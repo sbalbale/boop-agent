@@ -13,9 +13,12 @@ import { runtimeText, type RuntimeReasoningEffort, type RuntimeTool } from "./ru
 import {
   CODEX_MODEL_ALIASES,
   KNOWN_CODEX_MODELS,
+  KNOWN_LLAMA_SERVER_MODELS,
   KNOWN_MODELS,
+  LLAMA_SERVER_MODEL_ALIASES,
   MODEL_ALIASES,
   RUNTIME_ALIASES,
+  getLlamaServerBaseUrl,
   getRuntimeConfig,
   getBrowserSettings,
   resolveModelInput,
@@ -55,6 +58,9 @@ export function createSelfTools(): RuntimeTool[] {
           codexEnvDefault: process.env.BOOP_CODEX_MODEL ?? "gpt-5.5",
           availableClaudeModels: [...KNOWN_MODELS],
           availableCodexModels: [...KNOWN_CODEX_MODELS],
+          availableLlamaServerModels: [...KNOWN_LLAMA_SERVER_MODELS],
+          llamaServerEnvDefault: process.env.BOOP_LLAMA_SERVER_MODEL ?? "gemma4-12b-qat-256k",
+          llamaServerBaseUrl: getLlamaServerBaseUrl(),
           userTimezone: tzInfo.isExplicit ? tzInfo.timezone : null,
           timezoneFallback: tzInfo.isExplicit ? null : tzInfo.timezone,
           currentLocalTime: tzInfo.now,
@@ -111,7 +117,7 @@ Use when the user tells you their timezone or location ("I'm in Dallas", "use ce
       "set_runtime",
       `Switch Boop's provider/runtime for future turns. The change applies to the next top-level turn. Accepts aliases: ${Object.keys(RUNTIME_ALIASES)
         .map((k) => `"${k}"`)
-        .join(", ")}. Use "claude" for the Anthropic Claude Agent SDK provider and "codex" for the local Codex app-server provider backed by the user's ChatGPT/Codex subscription.`,
+        .join(", ")}. Use "claude" for the Anthropic Claude Agent SDK provider, "codex" for the local Codex app-server provider backed by the user's ChatGPT/Codex subscription, and "llama-server" for a self-hosted OpenAI-compatible endpoint (llama.cpp/llama-swap/vLLM/Ollama) with no subscription or API key required.`,
       { runtime: z.string().describe('Runtime/provider to use, e.g. "claude" or "codex".') },
       async ({ runtime }) => {
         const resolved = resolveRuntimeInput(runtime);
@@ -136,8 +142,10 @@ Claude aliases: ${Object.keys(MODEL_ALIASES).map((k) => `"${k}"`).join(", ")}
 Claude canonical: ${[...KNOWN_MODELS].map((k) => `"${k}"`).join(", ")}
 Codex aliases: ${Object.keys(CODEX_MODEL_ALIASES).map((k) => `"${k}"`).join(", ")}
 Codex canonical: ${[...KNOWN_CODEX_MODELS].map((k) => `"${k}"`).join(", ")}
+llama-server aliases: ${Object.keys(LLAMA_SERVER_MODEL_ALIASES).map((k) => `"${k}"`).join(", ")}
+llama-server known models (not exhaustive — any model your endpoint has loaded is valid): ${[...KNOWN_LLAMA_SERVER_MODELS].map((k) => `"${k}"`).join(", ")}
 
-Use when the user says "use opus", "switch to sonnet", "use Codex mini", "make it faster", etc.`,
+Use when the user says "use opus", "switch to sonnet", "use Codex mini", "use gemma", "make it faster", etc.`,
       {
         model: z
           .string()
@@ -147,8 +155,18 @@ Use when the user says "use opus", "switch to sonnet", "use Codex mini", "make i
         const runtime = (await getRuntimeConfig()).runtime;
         const resolved = resolveModelInput(model, runtime);
         if (!resolved) {
-          const known = runtime === "codex" ? [...KNOWN_CODEX_MODELS] : [...KNOWN_MODELS];
-          const aliases = runtime === "codex" ? CODEX_MODEL_ALIASES : MODEL_ALIASES;
+          const known =
+            runtime === "codex"
+              ? [...KNOWN_CODEX_MODELS]
+              : runtime === "llama-server"
+                ? [...KNOWN_LLAMA_SERVER_MODELS]
+                : [...KNOWN_MODELS];
+          const aliases =
+            runtime === "codex"
+              ? CODEX_MODEL_ALIASES
+              : runtime === "llama-server"
+                ? LLAMA_SERVER_MODEL_ALIASES
+                : MODEL_ALIASES;
           return runtimeText(
             `Unknown ${runtime} model "${model}". Try one of: ${known.join(", ")} or aliases ${Object.keys(aliases).join(", ")}.`,
             false,

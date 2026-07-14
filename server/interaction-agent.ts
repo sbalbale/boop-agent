@@ -256,18 +256,22 @@ function randomId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function runtimeLabel(runtime: "claude" | "codex"): string {
-  return runtime === "codex" ? "Codex" : "Claude";
+function runtimeLabel(runtime: "claude" | "codex" | "llama-server"): string {
+  if (runtime === "codex") return "Codex";
+  if (runtime === "llama-server") return "llama-server";
+  return "Claude";
 }
 
-export function resolveDirectRuntimeSwitch(content: string): "claude" | "codex" | null {
+export function resolveDirectRuntimeSwitch(
+  content: string,
+): "claude" | "codex" | "llama-server" | null {
   const normalized = content
     .trim()
     .toLowerCase()
     .replace(/[.!?]+$/g, "")
     .replace(/\s+/g, " ");
   const match = normalized.match(
-    /^(?:please |pls |can you )?(?:switch|change|set|use|move|flip)(?: me| boop)?(?: (?:runtime|provider))?(?: back| over)?(?: to)? (?<runtime>claude agent sdk|chatgpt codex|anthropic|claude|codex|chatgpt)(?: runtime| provider)?(?: for (?:the )?next turn)?(?: please)?$/,
+    /^(?:please |pls |can you )?(?:switch|change|set|use|move|flip)(?: me| boop)?(?: (?:runtime|provider))?(?: back| over)?(?: to)? (?<runtime>claude agent sdk|chatgpt codex|anthropic|claude|codex|chatgpt|llama server|llama-server|llama|local|gemma)(?: runtime| provider)?(?: for (?:the )?next turn)?(?: please)?$/,
   );
   if (!match?.groups?.runtime) return null;
   return resolveRuntimeInput(match.groups.runtime);

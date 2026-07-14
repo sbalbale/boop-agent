@@ -7,6 +7,7 @@ import { join } from "node:path";
 const RUNTIME_KEY = "runtime";
 const CLAUDE_MODEL_KEY = "model";
 const CODEX_MODEL_KEY = "codex_model";
+const LLAMA_SERVER_MODEL_KEY = "llama_server_model";
 const CODEX_REASONING_EFFORT_KEY = "codex_reasoning_effort";
 const BROWSER_ENABLED_KEY = "browser_enabled";
 const BROWSER_PROFILE_DIR_KEY = "browser_profile_dir";
@@ -28,7 +29,7 @@ export interface RuntimeConfig {
   runtime: RuntimeName;
   model: string;
   reasoningEffort?: RuntimeReasoningEffort;
-  billingMode: "api" | "codex-subscription";
+  billingMode: "api" | "codex-subscription" | "local";
 }
 
 let cachedConfig: { at: number; value: RuntimeConfig } | null = null;
@@ -74,6 +75,12 @@ export const RUNTIME_ALIASES: Record<string, RuntimeName> = {
   codex: "codex",
   chatgpt: "codex",
   "chatgpt codex": "codex",
+  "llama-server": "llama-server",
+  "llama server": "llama-server",
+  llama: "llama-server",
+  local: "llama-server",
+  gemma: "llama-server",
+  "openai-compatible": "llama-server",
 };
 
 // Backward-compatible names kept for existing imports and prompt text.
@@ -115,6 +122,28 @@ export const KNOWN_CODEX_MODELS = new Set<string>([
   "gpt-5.2",
 ]);
 
+// llama-server (and other self-hosted OpenAI-compatible endpoints) don't have
+// a fixed vendor model list — whatever the operator has loaded is valid. These
+// are just convenience aliases; resolveModelInput() falls through to
+// accepting any non-empty string for this runtime rather than rejecting
+// unknown names the way it does for Claude/Codex.
+export const LLAMA_SERVER_MODEL_ALIASES: Record<string, string> = {
+  gemma: "gemma4-12b-qat-256k",
+  "gemma 12b": "gemma4-12b-qat-256k",
+  "gemma4 12b": "gemma4-12b-qat-256k",
+  "gemma 26b": "gemma4-26b-a4b-qat-256k",
+  "gemma4 26b": "gemma4-26b-a4b-qat-256k",
+  qwen: "qwen3.6-35b-a3b-mtp-256k",
+};
+
+export const KNOWN_LLAMA_SERVER_MODELS = new Set<string>([
+  "gemma4-12b-qat-256k",
+  "gemma4-26b-a4b-qat-128k",
+  "gemma4-26b-a4b-qat-256k",
+  "qwen3.6-35b-a3b-mtp-128k",
+  "qwen3.6-35b-a3b-mtp-256k",
+]);
+
 const KNOWN_REASONING_EFFORTS = new Set<RuntimeReasoningEffort>([
   "minimal",
   "low",
@@ -131,10 +160,18 @@ export function resolveModelInput(
   input: string,
   runtime: RuntimeName = "claude",
 ): string | null {
-  const lower = input.trim().toLowerCase();
+  const trimmed = input.trim();
+  const lower = trimmed.toLowerCase();
   if (runtime === "codex") {
     if (KNOWN_CODEX_MODELS.has(lower)) return lower;
     return CODEX_MODEL_ALIASES[lower] ?? null;
+  }
+  if (runtime === "llama-server") {
+    if (!trimmed) return null;
+    if (LLAMA_SERVER_MODEL_ALIASES[lower]) return LLAMA_SERVER_MODEL_ALIASES[lower];
+    // Self-hosted model catalogs are operator-defined; accept anything the
+    // caller passes rather than rejecting names we don't happen to know.
+    return trimmed;
   }
   if (KNOWN_MODELS.has(lower)) return lower;
   return MODEL_ALIASES[lower] ?? null;
@@ -151,6 +188,22 @@ function claudeEnvFallback(): string {
 
 function codexEnvFallback(): string {
   return process.env.BOOP_CODEX_MODEL ?? "gpt-5.5";
+}
+
+function llamaServerEnvFallback(): string {
+  return process.env.BOOP_LLAMA_SERVER_MODEL ?? "gemma4-12b-qat-256k";
+}
+
+// No hardcoded default here on purpose — this points at whatever self-hosted
+// endpoint the operator runs, which varies per install and shouldn't be
+// baked into the repo. Falls back to a generic local port only so a
+// zero-config `llama-server`/llama.cpp run on localhost still works.
+export function getLlamaServerBaseUrl(): string {
+  return process.env.BOOP_LLAMA_SERVER_BASE_URL ?? "http://localhost:8080/v1";
+}
+
+export function getLlamaServerApiKey(): string | undefined {
+  return process.env.BOOP_LLAMA_SERVER_API_KEY || undefined;
 }
 
 function resolveReasoningEffort(input: string | null): RuntimeReasoningEffort {
@@ -206,6 +259,12 @@ export function parseEnvExtraArgs(input: string | undefined): string[] {
   return parseExtraArgs(input?.replace(/[ \t]+/g, "\n") ?? null);
 }
 
+function modelSettingKeyFor(runtime: RuntimeName): string {
+  if (runtime === "codex") return CODEX_MODEL_KEY;
+  if (runtime === "llama-server") return LLAMA_SERVER_MODEL_KEY;
+  return CLAUDE_MODEL_KEY;
+}
+
 export async function getRuntimeConfig(): Promise<RuntimeConfig> {
   if (cachedConfig && Date.now() - cachedConfig.at < CONFIG_TTL_MS) {
     return cachedConfig.value;
@@ -221,6 +280,10 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
     model = stored && KNOWN_CODEX_MODELS.has(stored) ? stored : codexEnvFallback();
     reasoningEffort = resolveReasoningEffort(await getSetting(CODEX_REASONING_EFFORT_KEY));
     billingMode = "codex-subscription";
+  } else if (runtime === "llama-server") {
+    const stored = await getSetting(LLAMA_SERVER_MODEL_KEY);
+    model = stored?.trim() || llamaServerEnvFallback();
+    billingMode = "local";
   } else {
     const stored = await getSetting(CLAUDE_MODEL_KEY);
     model = stored && KNOWN_MODELS.has(stored) ? stored : claudeEnvFallback();
@@ -244,7 +307,7 @@ export async function setRuntimeProvider(runtime: RuntimeName): Promise<void> {
 export async function setRuntimeModel(model: string, runtime?: RuntimeName): Promise<void> {
   const targetRuntime = runtime ?? (await getRuntimeConfig()).runtime;
   await convex.mutation(api.settings.set, {
-    key: targetRuntime === "codex" ? CODEX_MODEL_KEY : CLAUDE_MODEL_KEY,
+    key: modelSettingKeyFor(targetRuntime),
     value: model,
   });
   cachedConfig = null;
@@ -263,7 +326,7 @@ export async function setCodexReasoningEffort(
 export async function clearRuntimeModel(runtime?: RuntimeName): Promise<void> {
   const targetRuntime = runtime ?? (await getRuntimeConfig()).runtime;
   await convex.mutation(api.settings.clear, {
-    key: targetRuntime === "codex" ? CODEX_MODEL_KEY : CLAUDE_MODEL_KEY,
+    key: modelSettingKeyFor(targetRuntime),
   });
   cachedConfig = null;
 }
