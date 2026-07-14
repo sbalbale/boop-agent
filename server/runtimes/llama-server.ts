@@ -50,7 +50,7 @@ type OpenAiChatCompletionResponse = {
 };
 
 function toolId(namespace: string, name: string): string {
-  return `${namespace}__${name}`;
+  return `mcp__${namespace}__${name}`;
 }
 
 function matchesToolPattern(id: string, pattern: string): boolean {

@@ -8,7 +8,7 @@ const DAY = 24 * HOUR;
 const DEMO_EMBEDDING_DIMENSIONS = 1024;
 
 type Runtime = "claude" | "codex";
-type BillingMode = "api" | "codex-subscription";
+type BillingMode = "api" | "codex-subscription" | "local";
 type AgentStatus = "spawned" | "running" | "completed" | "failed" | "cancelled";
 type AutomationRunStatus = "running" | "completed" | "failed";
 type ConsolidationStatus = "running" | "completed" | "failed";
