@@ -116,6 +116,26 @@ export function isTrustedLocalRequest(request: RequestLike): boolean {
   );
 }
 
+// Lets a specific, explicitly-trusted reverse proxy (e.g. an internal NPM
+// instance sitting behind auth of its own) vouch for a request without
+// requiring the connection itself to be loopback. The proxy must inject this
+// header with a value matching BOOP_TRUSTED_PROXY_SECRET — nothing else on
+// the network knows the secret, so this does not widen trust to "anyone who
+// can reach this box" the way relaxing the loopback check outright would.
+// Unset BOOP_TRUSTED_PROXY_SECRET (the default) disables this path entirely.
+const TRUSTED_PROXY_SECRET_HEADER = "x-boop-proxy-secret";
+
+export function isTrustedReverseProxyRequest(request: RequestLike): boolean {
+  const secret = process.env.BOOP_TRUSTED_PROXY_SECRET;
+  if (!secret) return false;
+  const provided = headerValues(request.headers[TRUSTED_PROXY_SECRET_HEADER])[0];
+  return provided === secret;
+}
+
+export function isTrustedRequest(request: RequestLike): boolean {
+  return isTrustedLocalRequest(request) || isTrustedReverseProxyRequest(request);
+}
+
 export function isPublicServerRequest(request: RequestLike): boolean {
   let pathname: string;
   try {

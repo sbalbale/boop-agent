@@ -2,7 +2,7 @@ import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
-import { isTrustedLocalRequest } from "../server/local-access.js";
+import { isTrustedRequest } from "../server/local-access.js";
 
 const PROJECT_ROOT = path.resolve(__dirname, "..");
 
@@ -16,7 +16,7 @@ function localConnectionConfig(phoneNumber: string): Plugin {
           next();
           return;
         }
-        if (!isTrustedLocalRequest(req)) {
+        if (!isTrustedRequest(req)) {
           res.statusCode = 404;
           res.end("Not found");
           return;
@@ -37,6 +37,15 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, PROJECT_ROOT, "");
   const port = Number(env.PORT ?? process.env.PORT ?? 3456);
 
+  // isTrustedRequest() (shared with the server) reads process.env directly,
+  // but this Vite dev-server process is spawned separately from the server
+  // process and never runs server/env-setup.ts's dotenv load. Bridge just
+  // this one var through from Vite's own loadEnv() so the reverse-proxy
+  // trust check works for requests handled inside this process too.
+  if (env.BOOP_TRUSTED_PROXY_SECRET) {
+    process.env.BOOP_TRUSTED_PROXY_SECRET = env.BOOP_TRUSTED_PROXY_SECRET;
+  }
+
   return {
     root: path.resolve(__dirname),
     envDir: PROJECT_ROOT,
@@ -47,6 +56,15 @@ export default defineConfig(({ mode }) => {
     ],
     server: {
       port: 5173,
+      host: true,
+      // Extra hostnames Vite's dev-server should accept (beyond localhost),
+      // e.g. when reached through an internal reverse proxy at a real
+      // domain. Comma-separated; kept out of source since it is
+      // deployment-specific, not something to hardcode into a fork.
+      allowedHosts: (env.BOOP_DASHBOARD_ALLOWED_HOSTS ?? "")
+        .split(",")
+        .map((h) => h.trim())
+        .filter(Boolean),
       proxy: {
         "/api": {
           target: `http://localhost:${port}`,

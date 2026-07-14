@@ -30,7 +30,7 @@ import {
   setRuntimeProvider,
 } from "./runtime-config.js";
 import { startImageCleanup } from "./images/clean.js";
-import { isPublicServerRequest, isTrustedLocalRequest } from "./local-access.js";
+import { isPublicServerRequest, isTrustedRequest } from "./local-access.js";
 
 async function main() {
   await loadIntegrations();
@@ -57,7 +57,7 @@ async function main() {
 
   const app = express();
   app.use((req, res, next) => {
-    if (isPublicServerRequest(req) || isTrustedLocalRequest(req)) {
+    if (isPublicServerRequest(req) || isTrustedRequest(req)) {
       next();
       return;
     }
@@ -190,7 +190,7 @@ async function main() {
   const server = createServer(app);
   const wss = new WebSocketServer({ server, path: "/ws" });
   wss.on("connection", (ws, request) => {
-    if (!isTrustedLocalRequest(request)) {
+    if (!isTrustedRequest(request)) {
       ws.close(1008, "local connections only");
       return;
     }
