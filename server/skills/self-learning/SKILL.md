@@ -19,6 +19,14 @@ will generalize — not for a one-off task result. Good signals:
   figured out the specific parameter or sequence that fixes it.
 - You'd genuinely want your own future self (or a sub-agent) to know this
   before attempting a similar task again.
+- **The user corrected you, or asked a follow-up adding requirements you
+  should have included the first time, more than once in the same
+  conversation about the same kind of request.** This is the clearest signal
+  of all and the easiest to miss: if someone has to ask "what about X?" or
+  "you forgot Y" twice for the same type of task, write the skill yourself,
+  immediately, as soon as you notice the pattern — do NOT wait for them to
+  explicitly say "make this a skill." Being asked to save a skill after
+  already being corrected twice means you should have caught it on your own.
 
 Bad reasons to write one:
 - "I finished this task" — that's just doing the task, not a lesson.

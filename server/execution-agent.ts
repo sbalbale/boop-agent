@@ -9,6 +9,7 @@ import {
 import { createDraftStagingTools } from "./draft-tools.js";
 import { createSkillTools, buildSkillIndex } from "./skills.js";
 import { createWebTools } from "./web-tools.js";
+import { createWeatherTools } from "./weather-tools.js";
 import { describeUserNow } from "./timezone-config.js";
 import { EMPTY_USAGE, type UsageTotals } from "./usage.js";
 import { getRuntimeConfig, type RuntimeConfig } from "./runtime-config.js";
@@ -172,6 +173,10 @@ export async function spawnExecutionAgent(opts: SpawnExecutionAgentOpts): Promis
   // Claude/Codex get web search from their own SDK/API; llama-server has no
   // equivalent, so it gets a custom SearXNG-backed implementation instead.
   const webTools = runtimeConfig.runtime === "llama-server" ? createWebTools() : [];
+  // Weather deserves a dedicated tool regardless of runtime — generic web
+  // search (even Claude/Codex's own) pulls stale/cached numbers from search
+  // snippets, which is a worse source than querying the NWS API directly.
+  const weatherTools = createWeatherTools();
   const integrationServers =
     runtimeConfig.runtime === "claude"
       ? await buildMcpServersForIntegrations(opts.integrations, opts.conversationId)
@@ -181,7 +186,7 @@ export async function spawnExecutionAgent(opts: SpawnExecutionAgentOpts): Promis
       ? await buildRuntimeToolsForIntegrations(opts.integrations, opts.conversationId)
       : [];
   const mcpServers = integrationServers;
-  const runtimeTools = [...draftTools, ...skillTools, ...webTools, ...integrationTools];
+  const runtimeTools = [...draftTools, ...skillTools, ...webTools, ...weatherTools, ...integrationTools];
   const runtimeToolNamespaces = [...new Set(integrationTools.map((tool) => tool.namespace))];
   const allowedTools = [
     "WebSearch",
@@ -189,6 +194,7 @@ export async function spawnExecutionAgent(opts: SpawnExecutionAgentOpts): Promis
     "Skill",
     "mcp__boop-skills__*",
     "mcp__boop-web__*",
+    "mcp__boop-weather__*",
     ...Object.keys(mcpServers).flatMap((n) => [`mcp__${n}__*`]),
     ...(draftTools.length ? ["mcp__boop-drafts__*"] : []),
     ...runtimeToolNamespaces.flatMap((n) => [`mcp__${n}__*`]),
