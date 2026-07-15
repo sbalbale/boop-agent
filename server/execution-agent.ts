@@ -7,6 +7,7 @@ import {
   listIntegrations,
 } from "./integrations/registry.js";
 import { createDraftStagingTools } from "./draft-tools.js";
+import { createSkillTools, buildSkillIndex } from "./skills.js";
 import { EMPTY_USAGE, type UsageTotals } from "./usage.js";
 import { getRuntimeConfig, type RuntimeConfig } from "./runtime-config.js";
 import { runAgentRuntime } from "./runtimes/index.js";
@@ -68,6 +69,10 @@ Your job:
 2. Use your tools — WebSearch, WebFetch, and any integrations loaded for this spawn — to investigate and act.
 3. Return a concise, well-structured answer — not a data dump.
 
+Skills:
+Additional tool-usage guidance lives in on-demand skills — short summaries below. Call use_skill(name) to load one's full instructions before attempting a task that matches it.
+{{SKILLS}}
+
 Research discipline:
 - Prefer WebSearch for fresh/factual questions. WebFetch when you need the content of a known URL.
 - Cite real URLs only — NEVER invent sources. If a page failed to load, say so.
@@ -82,20 +87,10 @@ Local browser:
 Apple data:
 - If the "apple" integration is loaded, its tools return read-only local Apple data from the user's Mac. iMessage reads run from the local server with Full Disk Access; Apple Notes and Apple Reminders read from the local server with macOS Automation permission; Apple Calendar uses the optional Apple bridge. They never modify anything.
 - Never include phone numbers in your response. For iMessage/SMS lookups, refer to contact names, message text, timing, or "the matching thread" instead of phone numbers.
-- iMessage search — find the THREAD first, then read it, don't keyword-search across everyone's messages: call apple_list_chats (or use participant directly if you already know it) to find the right chat_id/participant for the person named, then call apple_read_messages with that chat_id or participant. A reply like "I have a dinner but Jordan should be back" will not itself contain a keyword like "pickup", but apple_read_messages automatically includes a few messages before/after each "query" match in the same thread (the "context" parameter, default 3), specifically so replies phrased differently are still visible — so it's fine, and usually better, to pass "query" set to the topic keyword alongside chat_id/participant rather than omitting it; you don't need to read the entire thread unfiltered. Only raise "context" (or drop "query" entirely) if the default window doesn't reach far enough to show the reply you need.
-- When you get results back, the reply you're looking for usually will NOT repeat the search keyword — do not require it to. Treat ANY message from the other person that comes chronologically shortly after the message you were originally looking for as their reply/response to it, and report it as such, even if it doesn't mention the original topic word at all. A one-line reply like "kk", "yeah works", or "I have a dinner but X should be back" sent a minute after your question about a pickup IS the answer to that question — don't conclude "no reply" or "nothing about a pickup" just because that specific message lacks the word "pickup".
+- See the \`imessage-search\` skill for how to search iMessage threads without missing replies.
 
 Integration tool call sizing (Gmail, Calendar, and similar data-fetching tools):
-- ALWAYS pass the smallest reasonable limit/max_results/count parameter the tool accepts — never call a fetch/search/list tool with no limit at all. Default to something like 5-10 results unless the task clearly needs more.
-- ALWAYS use the tool's own query/filter parameters (sender, subject, date range, label, keywords) to narrow results server-side, instead of fetching broadly and filtering yourself afterward.
-- If a task requires more than one page of results, fetch one page, check whether it already answers the task, and only fetch more if genuinely necessary — don't pre-emptively pull everything.
-- These tools can return large raw payloads (full email/message bodies) that blow past your own context window if fetched unbounded — a request that's too large will fail outright rather than degrade gracefully, so err on the side of fetching less.
-
-Gmail specifically — search in two passes, cheap then expensive:
-1. First call GMAIL_FETCH_EMAILS with verbose:false and include_payload:false (both default to true, which pulls full bodies/attachments and is what blows the context — you must explicitly set them false). This returns only subject/sender/recipient/time/labels per message, at a fraction of the cost. Use the query parameter (Gmail search syntax: "from:", "subject:", "after:YYYY/MM/DD", "is:unread", etc.) to narrow before fetching, not after.
-2. Look at the subjects/senders/dates from that lightweight pass and identify which specific messages actually look relevant to the task.
-3. Only for those specific candidates, call GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID (using the message id from step 1) to get the full body/details you actually need to answer the question.
-Do not call GMAIL_FETCH_EMAILS with verbose/include_payload left at their defaults (true) for anything more than 1 message — that combination is what has caused real failures here.
+See the \`gmail-search\` skill for how to size and sequence tool calls so you don't blow your own context window.
 
 MANDATORY: for any task that used WebSearch or WebFetch, end your response with
 a "Sources:" section listing the ACTUAL URLs you fetched or found. Example:
@@ -168,6 +163,7 @@ export async function spawnExecutionAgent(opts: SpawnExecutionAgentOpts): Promis
   await convex.mutation(api.agents.update, { agentId, status: "running" });
 
   const draftTools = opts.conversationId ? createDraftStagingTools(opts.conversationId) : [];
+  const skillTools = createSkillTools();
   const integrationServers =
     runtimeConfig.runtime === "claude"
       ? await buildMcpServersForIntegrations(opts.integrations, opts.conversationId)
@@ -177,12 +173,13 @@ export async function spawnExecutionAgent(opts: SpawnExecutionAgentOpts): Promis
       ? await buildRuntimeToolsForIntegrations(opts.integrations, opts.conversationId)
       : [];
   const mcpServers = integrationServers;
-  const runtimeTools = [...draftTools, ...integrationTools];
+  const runtimeTools = [...draftTools, ...skillTools, ...integrationTools];
   const runtimeToolNamespaces = [...new Set(integrationTools.map((tool) => tool.namespace))];
   const allowedTools = [
     "WebSearch",
     "WebFetch",
     "Skill",
+    "mcp__boop-skills__*",
     ...Object.keys(mcpServers).flatMap((n) => [`mcp__${n}__*`]),
     ...(draftTools.length ? ["mcp__boop-drafts__*"] : []),
     ...runtimeToolNamespaces.flatMap((n) => [`mcp__${n}__*`]),
@@ -201,7 +198,7 @@ export async function spawnExecutionAgent(opts: SpawnExecutionAgentOpts): Promis
     });
     const result = await runAgentRuntime(runtimeConfig, {
       prompt: executionPrompt,
-      systemPrompt: EXECUTION_SYSTEM,
+      systemPrompt: EXECUTION_SYSTEM.replace("{{SKILLS}}", buildSkillIndex()),
       claudeMcpServers: mcpServers,
       tools: runtimeTools,
       allowedTools,

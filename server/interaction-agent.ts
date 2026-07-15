@@ -8,6 +8,7 @@ import { listEnabledIntegrations } from "./integrations/registry.js";
 import { createAutomationTools } from "./automation-tools.js";
 import { createDraftDecisionTools } from "./draft-tools.js";
 import { createSelfTools } from "./self-tools.js";
+import { createSkillTools, buildSkillIndex } from "./skills.js";
 import {
   getRuntimeConfig,
   resolveRuntimeInput,
@@ -40,7 +41,12 @@ Your only tools:
 - spawn_agent (dispatches a sub-agent that CAN touch the world)
 - create_automation / list_automations / toggle_automation / delete_automation
 - list_drafts / send_draft / reject_draft
-- get_config / set_runtime / set_model / set_codex_reasoning_effort / set_timezone / list_integrations / search_composio_catalog / inspect_toolkit (self-inspection)
+- get_config / set_runtime / set_model / set_reasoning_effort / set_timezone / list_integrations / search_composio_catalog / inspect_toolkit (self-inspection)
+- use_skill (load detailed guidance for a specific situation)
+
+Skills:
+Additional guidance lives in on-demand skills — short summaries below. Call use_skill(name) to load one's full instructions before attempting a related task.
+{{SKILLS}}
 
 You cannot answer factual questions from your own knowledge. Not allowed.
 You have NO browser, NO WebSearch, NO WebFetch, NO file access, NO APIs.
@@ -179,15 +185,7 @@ Apple-only. Only skip Gmail when the user explicitly asks for local Apple data
 only or no email.
 
 Package/shipping searches:
-When asked about packages, deliveries, or what's "out for delivery", phrase
-the sub-agent's task GENERICALLY. Do not enumerate specific carriers or
-retailers (UPS, FedEx, USPS, Amazon, etc.) as example senders — the sender
-could be ANY retailer, marketplace, or carrier (AliExpress, Etsy, a local
-shop, a direct courier, and so on), and naming a few well-known ones in the
-task narrows the sub-agent's own search to just those instead of searching
-broadly. Ask it to search using generic shipping/delivery terms and let it
-decide what's relevant from the results, rather than searching for specific
-company names, unless the user themselves named a specific company.
+See the \`package-search\` skill before phrasing a package/delivery/shipping spawn_agent task.
 
 Apple data (local, read-only):
 The optional "apple" integration reads iMessage texts, Apple Calendar events,
@@ -208,7 +206,7 @@ When the user asks about Boop itself, pick the tool by intent:
 - Wants to switch providers/runtimes (Claude vs Codex) → set_runtime
 - Wants to switch models or change speed/quality tradeoff → set_model
   (takes effect next turn; this turn finishes on the current model)
-- Wants to tune Codex depth/speed specifically → set_codex_reasoning_effort
+- Wants to tune reasoning depth/speed (Codex or llama-server) → set_reasoning_effort
 - Wants to know which integrations or accounts are connected → list_integrations
 - Wondering whether some service is connectable at all → search_composio_catalog
 - Probing the actual capabilities of a specific connected integration
@@ -368,7 +366,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   const systemPrompt = INTERACTION_SYSTEM.replace(
     "{{INTEGRATIONS}}",
     integrations.join(", ") || "(no integrations configured yet)",
-  );
+  ).replace("{{SKILLS}}", buildSkillIndex());
 
   const userText = opts.mediaError
     ? `[user sent images but they couldn't be downloaded: ${opts.mediaError}]\n${opts.content}`
@@ -468,6 +466,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
     ...createAutomationTools(opts.conversationId),
     ...createDraftDecisionTools(opts.conversationId, runtimeConfig),
     ...createSelfTools(),
+    ...createSkillTools(),
     defineRuntimeTool(
       "boop-ack",
       "send_ack",
@@ -561,11 +560,12 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
               "mcp__boop-self__get_config",
               "mcp__boop-self__set_runtime",
               "mcp__boop-self__set_model",
-              "mcp__boop-self__set_codex_reasoning_effort",
+              "mcp__boop-self__set_reasoning_effort",
               "mcp__boop-self__set_timezone",
               "mcp__boop-self__list_integrations",
               "mcp__boop-self__search_composio_catalog",
               "mcp__boop-self__inspect_toolkit",
+              "mcp__boop-skills__use_skill",
             ],
       // Belt-and-suspenders: even with bypassPermissions the SDK can leak
       // its built-ins if we only whitelist. Explicitly block them on the
