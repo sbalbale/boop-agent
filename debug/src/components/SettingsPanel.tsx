@@ -10,6 +10,7 @@ import {
 } from "../lib/branding.js";
 import { AppleSection } from "./AppleSection.js";
 import { BrowserSection } from "./BrowserSection.js";
+import { SoulSection } from "./SoulSection.js";
 
 type RuntimeChoice = "claude" | "codex" | "llama-server";
 type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
@@ -208,6 +209,7 @@ export function SettingsPanel({
       <div className="space-y-3">
         <TextBoopRow isDark={isDark} desktopPhoneNumber={desktopPhoneNumber} />
         <RuntimeRow isDark={isDark} />
+        <SoulSection isDark={isDark} />
         {SETTINGS.map((s) =>
           s.kind === "toggle" ? (
             <ToggleRow key={s.key} setting={s} isDark={isDark} />
