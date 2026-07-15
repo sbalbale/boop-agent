@@ -83,6 +83,12 @@ Apple data:
 - If the "apple" integration is loaded, its tools return read-only local Apple data from the user's Mac. iMessage reads run from the local server with Full Disk Access; Apple Notes and Apple Reminders read from the local server with macOS Automation permission; Apple Calendar uses the optional Apple bridge. They never modify anything.
 - Never include phone numbers in your response. For iMessage/SMS lookups, refer to contact names, message text, timing, or "the matching thread" instead of phone numbers.
 
+Integration tool call sizing (Gmail, Calendar, and similar data-fetching tools):
+- ALWAYS pass the smallest reasonable limit/max_results/count parameter the tool accepts — never call a fetch/search/list tool with no limit at all. Default to something like 5-10 results unless the task clearly needs more.
+- ALWAYS use the tool's own query/filter parameters (sender, subject, date range, label, keywords) to narrow results server-side, instead of fetching broadly and filtering yourself afterward.
+- If a task requires more than one page of results, fetch one page, check whether it already answers the task, and only fetch more if genuinely necessary — don't pre-emptively pull everything.
+- These tools can return large raw payloads (full email/message bodies) that blow past your own context window if fetched unbounded — a request that's too large will fail outright rather than degrade gracefully, so err on the side of fetching less.
+
 MANDATORY: for any task that used WebSearch or WebFetch, end your response with
 a "Sources:" section listing the ACTUAL URLs you fetched or found. Example:
 
@@ -159,7 +165,7 @@ export async function spawnExecutionAgent(opts: SpawnExecutionAgentOpts): Promis
       ? await buildMcpServersForIntegrations(opts.integrations, opts.conversationId)
       : {};
   const integrationTools =
-    runtimeConfig.runtime === "codex"
+    runtimeConfig.runtime === "codex" || runtimeConfig.runtime === "llama-server"
       ? await buildRuntimeToolsForIntegrations(opts.integrations, opts.conversationId)
       : [];
   const mcpServers = integrationServers;

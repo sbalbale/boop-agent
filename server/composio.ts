@@ -679,7 +679,7 @@ export function buildComposioIntegrationModule(slug: string): IntegrationModule 
                 dangerouslySkipVersionCheck: true,
               });
               return runtimeText(
-                JSON.stringify(result, null, 2),
+                truncateToolResult(JSON.stringify(result, null, 2), toolName),
                 Boolean((result as { successful?: boolean })?.successful ?? true),
               );
             } catch (err) {
@@ -690,6 +690,25 @@ export function buildComposioIntegrationModule(slug: string): IntegrationModule 
       });
     },
   };
+}
+
+// Composio tools like GMAIL_FETCH_EMAILS can return full raw email bodies —
+// a handful of results has genuinely blown past even a 256k-token context
+// window (observed live: 5 emails -> 442k tokens, rejected by llama-server).
+// Prompting the model to pass smaller limits/queries helps but isn't a
+// guarantee — cap any tool result server-side so a single call can never
+// exceed a sane fraction of the context, regardless of what the model did or
+// didn't ask for.
+const TOOL_RESULT_CHAR_LIMIT = 40_000; // ~10k tokens, generous but bounded
+
+function truncateToolResult(text: string, toolName: string): string {
+  if (text.length <= TOOL_RESULT_CHAR_LIMIT) return text;
+  const truncated = text.slice(0, TOOL_RESULT_CHAR_LIMIT);
+  return (
+    `${truncated}\n\n[...truncated: ${toolName} returned ${text.length} characters, showing ` +
+    `the first ${TOOL_RESULT_CHAR_LIMIT}. Retry with a smaller limit/max_results or a more ` +
+    `specific query/filter to get complete results instead of a truncated dump.]`
+  );
 }
 
 function withConnectedAccountSchema(schema: unknown, activeCount: number): Record<string, unknown> {
