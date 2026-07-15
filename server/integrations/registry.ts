@@ -47,6 +47,8 @@ export async function loadIntegrations(): Promise<void> {
   registerBrowserIntegration();
   const { registerAppleIntegration } = await import("./apple-loader.js");
   registerAppleIntegration();
+  const { registerSecondBrainIntegration } = await import("./second-brain-loader.js");
+  registerSecondBrainIntegration();
   const loaded = [...registry.keys()];
   const enabled = (await listEnabledIntegrations()).map((i) => i.name);
   console.log(
