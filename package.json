@@ -4,6 +4,9 @@
   "private": true,
   "description": "Text-an-agent starter: iMessage your Claude or Codex-backed agent, with sub-agents, memory, automations, and integrations.",
   "license": "MIT",
+  "overrides": {
+    "onnxruntime-node": "1.23.0"
+  },
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
@@ -130,7 +133,7 @@
     "esbuild@0.25.12": true,
     "fsevents@2.3.3": true,
     "fsevents@2.3.2": true,
-    "onnxruntime-node@1.24.3": true,
+    "onnxruntime-node@1.23.0": true,
     "protobufjs@7.6.5": true,
     "sharp@0.34.5": true
   }

@@ -206,6 +206,22 @@ export async function readLocalMessages(filters: LocalMessageFilters = {}): Prom
     const cutoff = Date.now() - filters.sinceHours * 60 * 60 * 1000;
     where.push(`m.date >= ${sqlInteger(appleNanoseconds(cutoff))}`);
   }
+  // The bot's own iMessage/SMS thread (the Sendblue-provisioned number) shows
+  // up like any other conversation in chat.db. An unscoped or broadly-scoped
+  // search would otherwise surface Boop's own prior replies as if they were
+  // something a real contact said, which is confusing at best and recursive
+  // at worst (a reply mentioning the search term gets found by the next search).
+  const botNumberDigits = normalizePhoneDigits(process.env.SENDBLUE_FROM_NUMBER ?? "");
+  if (botNumberDigits.length >= 7) {
+    const digits = botNumberDigits.length > 10 ? botNumberDigits.slice(-10) : botNumberDigits;
+    // Suffix match (not equality) because h.id may or may not include a
+    // leading country code, same reasoning as participantHandleCondition
+    // below. h.id is NULL for the user's own outgoing messages in
+    // group-style chats (no single "other party" handle to record) — NULL
+    // comparisons are neither true nor false, so those legitimate rows must
+    // be let through explicitly rather than only comparing the handle.
+    where.push(`(h.id IS NULL OR ${normalizedPhoneSql("h.id")} NOT LIKE ${sqlLiteral(`%${digits}`)})`);
+  }
 
   const baseSelect = `
     SELECT
@@ -228,7 +244,11 @@ export async function readLocalMessages(filters: LocalMessageFilters = {}): Prom
   const trimmedQuery = filters.query?.trim();
   const sql = trimmedQuery
     ? (() => {
-        const pattern = sqlLiteral(`%${escapeLike(trimmedQuery)}%`);
+        // Match with whitespace stripped from both sides so casual texting
+        // variants ("pick up" vs "pickup") still match each other — a plain
+        // substring LIKE missed a real message because the user's phrasing
+        // in their own question didn't happen to match how it was typed.
+        const pattern = sqlLiteral(`%${escapeLike(trimmedQuery.replace(/\s+/g, ""))}%`);
         const context = capContext(filters.context, 3);
         return `
     WITH filtered AS (${baseSelect}
@@ -238,7 +258,7 @@ export async function readLocalMessages(filters: LocalMessageFilters = {}): Prom
       FROM filtered
     ),
     matches AS (
-      SELECT chatId, rn FROM ranked WHERE text LIKE ${pattern} ESCAPE '\\'
+      SELECT chatId, rn FROM ranked WHERE REPLACE(REPLACE(REPLACE(text, ' ', ''), CHAR(9), ''), CHAR(10), '') LIKE ${pattern} ESCAPE '\\'
     )
     SELECT DISTINCT ranked.id, ranked.chatId, ranked.displayName, ranked.chatGuid,
       ranked.handle, ranked.isFromMe, ranked.text, ranked.attributedBodyHex,

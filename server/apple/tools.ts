@@ -288,7 +288,7 @@ export function createAppleTools(namespace = NAMESPACE): RuntimeTool[] {
           .string()
           .optional()
           .describe("Filter by a participant contact name, phone number, or email."),
-        query: z.string().optional().describe("Filter to messages containing this text, plus surrounding context (see \"context\")."),
+        query: z.string().optional().describe("Filter to messages containing this text (whitespace-insensitive, so \"pick up\" and \"pickup\" both match either spelling), plus surrounding context (see \"context\")."),
         context: z
           .number()
           .optional()
