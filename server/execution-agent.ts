@@ -94,6 +94,7 @@ Apple data:
 
 Integration tool call sizing (Gmail, Calendar, and similar data-fetching tools):
 See the \`gmail-search\` skill for how to size and sequence tool calls so you don't blow your own context window.
+See the \`google-calendar-search\` skill before checking Google Calendar availability broadly — the single-calendar tools miss anything on a secondary or shared calendar.
 
 MANDATORY: for any task that used WebSearch or WebFetch, end your response with
 a "Sources:" section listing the ACTUAL URLs you fetched or found. Example:
