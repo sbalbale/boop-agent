@@ -23,6 +23,9 @@ interface GeocodeResult {
   displayName: string;
 }
 
+// Shared by both providers — free, no key, works regardless of whether
+// OpenWeatherMap's key is valid, so the NWS fallback path never depends on
+// OpenWeatherMap succeeding at anything, including geocoding.
 async function geocode(location: string): Promise<GeocodeResult> {
   const url = new URL("https://nominatim.openstreetmap.org/search");
   url.searchParams.set("q", location);
@@ -40,11 +43,75 @@ async function geocode(location: string): Promise<GeocodeResult> {
   };
 }
 
+// --- OpenWeatherMap (primary, when a key is configured) ---
+
+interface OwmCurrent {
+  main: { temp: number; feels_like: number; humidity: number };
+  weather: Array<{ description: string }>;
+  wind: { speed: number };
+}
+
+interface OwmForecastEntry {
+  dt_txt: string;
+  main: { temp_min: number; temp_max: number };
+  pop?: number;
+}
+
+interface OwmForecast {
+  list: OwmForecastEntry[];
+}
+
+interface OwmAirPollution {
+  list: Array<{ main: { aqi: number } }>;
+}
+
+// OpenWeatherMap's free Air Pollution API reports its own 1-5 index, not the
+// US EPA 0-500 scale (AirNow/PurpleAir) — labeled explicitly in the output so
+// it isn't mistaken for the more familiar 0-500 number.
+const OWM_AQI_LABELS: Record<number, string> = {
+  1: "Good",
+  2: "Fair",
+  3: "Moderate",
+  4: "Poor",
+  5: "Very Poor",
+};
+
+async function getOpenWeatherReport(geo: GeocodeResult, apiKey: string): Promise<string> {
+  const base = "https://api.openweathermap.org/data/2.5";
+  const [current, forecast, air] = await Promise.all([
+    fetchJson<OwmCurrent>(`${base}/weather?lat=${geo.lat}&lon=${geo.lon}&appid=${apiKey}&units=imperial`),
+    fetchJson<OwmForecast>(`${base}/forecast?lat=${geo.lat}&lon=${geo.lon}&appid=${apiKey}&units=imperial`),
+    fetchJson<OwmAirPollution>(`${base}/air_pollution?lat=${geo.lat}&lon=${geo.lon}&appid=${apiKey}`).catch(
+      () => null,
+    ),
+  ]);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const todayEntries = forecast.list.filter((e) => e.dt_txt.startsWith(today));
+  const relevant = todayEntries.length > 0 ? todayEntries : forecast.list.slice(0, 8);
+  const high = Math.round(Math.max(...relevant.map((e) => e.main.temp_max)));
+  const low = Math.round(Math.min(...relevant.map((e) => e.main.temp_min)));
+  const maxPop = Math.round(Math.max(...relevant.map((e) => (e.pop ?? 0) * 100)));
+
+  const lines = [
+    `${geo.displayName} — currently ${Math.round(current.main.temp)}°F (feels like ${Math.round(
+      current.main.feels_like,
+    )}°F), ${current.weather[0]?.description ?? "conditions unavailable"}`,
+    `Humidity: ${current.main.humidity}% · Wind: ${Math.round(current.wind.speed)} mph`,
+    `Today: high ${high}°F / low ${low}°F, chance of rain ${maxPop}%`,
+  ];
+  if (air?.list[0]) {
+    const aqi = air.list[0].main.aqi;
+    lines.push(`Air Quality Index: ${OWM_AQI_LABELS[aqi] ?? aqi} (OpenWeatherMap's 1-5 scale, not the US 0-500 AQI scale)`);
+  }
+  lines.push("(Source: OpenWeatherMap)");
+  return lines.join("\n");
+}
+
+// --- National Weather Service (fallback, free, no key) ---
+
 interface NwsPoint {
-  properties: {
-    forecast: string;
-    observationStations: string;
-  };
+  properties: { forecast: string; observationStations: string };
 }
 
 interface NwsForecastPeriod {
@@ -65,10 +132,38 @@ interface NwsStations {
 }
 
 interface NwsObservation {
-  properties: {
-    temperature: { value: number | null };
-    textDescription: string | null;
-  };
+  properties: { temperature: { value: number | null }; textDescription: string | null };
+}
+
+async function getNwsReport(geo: GeocodeResult): Promise<string> {
+  const point = await fetchJson<NwsPoint>(`https://api.weather.gov/points/${geo.lat.toFixed(4)},${geo.lon.toFixed(4)}`);
+  const forecast = await fetchJson<NwsForecast>(point.properties.forecast);
+
+  let currentLine = "";
+  try {
+    const stations = await fetchJson<NwsStations>(point.properties.observationStations);
+    const stationId = stations.features[0]?.properties.stationIdentifier;
+    if (stationId) {
+      const obs = await fetchJson<NwsObservation>(`https://api.weather.gov/stations/${stationId}/observations/latest`);
+      const c = obs.properties.temperature.value;
+      const tempF = c === null ? null : Math.round((c * 9) / 5 + 32);
+      if (tempF !== null) {
+        currentLine = ` — currently ${tempF}°F${obs.properties.textDescription ? `, ${obs.properties.textDescription}` : ""}`;
+      }
+    }
+  } catch {
+    // A station not reporting recently (404) shouldn't block the forecast, which still answers the question.
+  }
+
+  const periods = forecast.properties.periods.slice(0, 2);
+  const lines = [
+    `${geo.displayName}${currentLine}`,
+    ...periods.map(
+      (p) => `${p.name}: ${p.temperature}°${p.temperatureUnit}, ${p.shortForecast}, wind ${p.windSpeed} ${p.windDirection}`,
+    ),
+    "(Source: National Weather Service, api.weather.gov — no AQI available.)",
+  ];
+  return lines.join("\n");
 }
 
 export function createWeatherTools(namespace = NAMESPACE): RuntimeTool[] {
@@ -76,48 +171,29 @@ export function createWeatherTools(namespace = NAMESPACE): RuntimeTool[] {
     defineRuntimeTool(
       namespace,
       "get_weather",
-      'Get current conditions and today/tonight\'s forecast for a US location, from the National Weather Service (api.weather.gov) — live station data and official forecasts, no API key needed. Prefer this over web_search for weather: search-engine snippets are often cached/stale and produce wrong numbers. US locations only. Does NOT include air quality index (that needs a separate EPA AirNow API key, not configured).',
+      "Get current conditions, today's forecast, and (when available) air quality for a US location. Uses OpenWeatherMap when configured (includes AQI), falling back automatically to the free National Weather Service API otherwise. Prefer this over web_search for weather: search-engine snippets are often cached/stale and produce wrong numbers. US locations only.",
       {
         location: z.string().describe('A US city/state or ZIP, e.g. "Weston, MA" or "02493".'),
       },
       async ({ location }) => {
+        let geo: GeocodeResult;
         try {
-          const geo = await geocode(location);
-          const point = await fetchJson<NwsPoint>(
-            `https://api.weather.gov/points/${geo.lat.toFixed(4)},${geo.lon.toFixed(4)}`,
-          );
-          const forecast = await fetchJson<NwsForecast>(point.properties.forecast);
+          geo = await geocode(location);
+        } catch (err) {
+          return runtimeText(`Weather lookup failed: ${err instanceof Error ? err.message : String(err)}`, false);
+        }
 
-          let currentLine = "";
+        const apiKey = process.env.BOOP_OPENWEATHER_API_KEY;
+        if (apiKey) {
           try {
-            const stations = await fetchJson<NwsStations>(point.properties.observationStations);
-            const stationId = stations.features[0]?.properties.stationIdentifier;
-            if (stationId) {
-              const obs = await fetchJson<NwsObservation>(
-                `https://api.weather.gov/stations/${stationId}/observations/latest`,
-              );
-              const c = obs.properties.temperature.value;
-              const tempF = c === null ? null : Math.round((c * 9) / 5 + 32);
-              if (tempF !== null) {
-                currentLine = ` — currently ${tempF}°F${
-                  obs.properties.textDescription ? `, ${obs.properties.textDescription}` : ""
-                }`;
-              }
-            }
-          } catch {
-            // A station not reporting recently (404) shouldn't block the forecast, which still answers the question.
+            return runtimeText(await getOpenWeatherReport(geo, apiKey));
+          } catch (err) {
+            console.warn("[weather] OpenWeatherMap failed, falling back to NWS:", err);
           }
+        }
 
-          const periods = forecast.properties.periods.slice(0, 2);
-          const lines = [
-            `${geo.displayName}${currentLine}`,
-            ...periods.map(
-              (p) =>
-                `${p.name}: ${p.temperature}°${p.temperatureUnit}, ${p.shortForecast}, wind ${p.windSpeed} ${p.windDirection}`,
-            ),
-            "(Source: National Weather Service, api.weather.gov — no AQI available.)",
-          ];
-          return runtimeText(lines.join("\n"));
+        try {
+          return runtimeText(await getNwsReport(geo));
         } catch (err) {
           return runtimeText(`Weather lookup failed: ${err instanceof Error ? err.message : String(err)}`, false);
         }
