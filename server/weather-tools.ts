@@ -51,14 +51,17 @@ interface OwmCurrent {
   wind: { speed: number };
 }
 
-interface OwmForecastEntry {
-  dt_txt: string;
-  main: { temp_min: number; temp_max: number };
+interface OwmDailyEntry {
+  temp: { day: number; min: number; max: number; night: number };
+  feels_like: { day: number };
+  humidity: number;
+  speed: number;
   pop?: number;
+  weather: Array<{ description: string }>;
 }
 
-interface OwmForecast {
-  list: OwmForecastEntry[];
+interface OwmDailyForecast {
+  list: OwmDailyEntry[];
 }
 
 interface OwmAirPollution {
@@ -78,27 +81,29 @@ const OWM_AQI_LABELS: Record<number, string> = {
 
 async function getOpenWeatherReport(geo: GeocodeResult, apiKey: string): Promise<string> {
   const base = "https://api.openweathermap.org/data/2.5";
-  const [current, forecast, air] = await Promise.all([
+  const [current, daily, air] = await Promise.all([
     fetchJson<OwmCurrent>(`${base}/weather?lat=${geo.lat}&lon=${geo.lon}&appid=${apiKey}&units=imperial`),
-    fetchJson<OwmForecast>(`${base}/forecast?lat=${geo.lat}&lon=${geo.lon}&appid=${apiKey}&units=imperial`),
+    fetchJson<OwmDailyForecast>(
+      `${base}/forecast/daily?lat=${geo.lat}&lon=${geo.lon}&cnt=1&appid=${apiKey}&units=imperial`,
+    ),
     fetchJson<OwmAirPollution>(`${base}/air_pollution?lat=${geo.lat}&lon=${geo.lon}&appid=${apiKey}`).catch(
       () => null,
     ),
   ]);
 
-  const today = new Date().toISOString().slice(0, 10);
-  const todayEntries = forecast.list.filter((e) => e.dt_txt.startsWith(today));
-  const relevant = todayEntries.length > 0 ? todayEntries : forecast.list.slice(0, 8);
-  const high = Math.round(Math.max(...relevant.map((e) => e.main.temp_max)));
-  const low = Math.round(Math.min(...relevant.map((e) => e.main.temp_min)));
-  const maxPop = Math.round(Math.max(...relevant.map((e) => (e.pop ?? 0) * 100)));
+  const today = daily.list[0];
+  const high = today ? Math.round(today.temp.max) : null;
+  const low = today ? Math.round(today.temp.min) : null;
+  const maxPop = today?.pop !== undefined ? Math.round(today.pop * 100) : null;
 
   const lines = [
     `${geo.displayName} — currently ${Math.round(current.main.temp)}°F (feels like ${Math.round(
       current.main.feels_like,
     )}°F), ${current.weather[0]?.description ?? "conditions unavailable"}`,
     `Humidity: ${current.main.humidity}% · Wind: ${Math.round(current.wind.speed)} mph`,
-    `Today: high ${high}°F / low ${low}°F, chance of rain ${maxPop}%`,
+    high !== null && low !== null
+      ? `Today: high ${high}°F / low ${low}°F${maxPop !== null ? `, chance of rain ${maxPop}%` : ""}`
+      : "Today's high/low forecast unavailable.",
   ];
   if (air?.list[0]) {
     const aqi = air.list[0].main.aqi;
