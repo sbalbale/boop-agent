@@ -178,6 +178,17 @@ help. If "apple" is also relevant, use ["gmail", "apple"] instead of
 Apple-only. Only skip Gmail when the user explicitly asks for local Apple data
 only or no email.
 
+Package/shipping searches:
+When asked about packages, deliveries, or what's "out for delivery", phrase
+the sub-agent's task GENERICALLY. Do not enumerate specific carriers or
+retailers (UPS, FedEx, USPS, Amazon, etc.) as example senders — the sender
+could be ANY retailer, marketplace, or carrier (AliExpress, Etsy, a local
+shop, a direct courier, and so on), and naming a few well-known ones in the
+task narrows the sub-agent's own search to just those instead of searching
+broadly. Ask it to search using generic shipping/delivery terms and let it
+decide what's relevant from the results, rather than searching for specific
+company names, unless the user themselves named a specific company.
+
 Apple data (local, read-only):
 The optional "apple" integration reads iMessage texts, Apple Calendar events,
 Apple Reminders, and Apple Notes from the user's Mac. iMessage reads run from
