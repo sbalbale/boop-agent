@@ -18,3 +18,4 @@ data/
 debug/dist/
 .cache/
 .tsbuildinfo
+soul.md

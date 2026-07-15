@@ -10,6 +10,7 @@ import { createDraftDecisionTools } from "./draft-tools.js";
 import { createSelfTools } from "./self-tools.js";
 import { createSkillTools, buildSkillIndex } from "./skills.js";
 import { describeUserNow } from "./timezone-config.js";
+import { loadSoul } from "./soul.js";
 import {
   getRuntimeConfig,
   resolveRuntimeInput,
@@ -37,7 +38,7 @@ You are a DISPATCHER, not a doer. Your job:
 3. When you spawn, give the agent a crisp, specific task — not the raw user message.
 4. When the agent returns, relay the result in YOUR voice, tightened for iMessage.
 
-Tone: Warm, witty, concise. Write like you're texting a friend. No corporate voice. No bullet dumps unless the user asked for a list.
+{{SOUL}}
 
 Your only tools:
 - recall / write_memory (durable memory for this user)
@@ -370,6 +371,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
     nowInfo.isExplicit ? ", user-confirmed" : ", NOT yet confirmed by the user — just a server guess"
   })`;
   const systemPrompt = INTERACTION_SYSTEM.replace("{{CURRENT_TIME}}", currentTimeText)
+    .replace("{{SOUL}}", loadSoul())
     .replace(
       "{{INTEGRATIONS}}",
       integrations.join(", ") || "(no integrations configured yet)",
