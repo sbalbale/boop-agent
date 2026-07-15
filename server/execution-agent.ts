@@ -8,6 +8,7 @@ import {
 } from "./integrations/registry.js";
 import { createDraftStagingTools } from "./draft-tools.js";
 import { createSkillTools, buildSkillIndex } from "./skills.js";
+import { createWebTools } from "./web-tools.js";
 import { describeUserNow } from "./timezone-config.js";
 import { EMPTY_USAGE, type UsageTotals } from "./usage.js";
 import { getRuntimeConfig, type RuntimeConfig } from "./runtime-config.js";
@@ -68,13 +69,12 @@ const EXECUTION_SYSTEM = `You are a focused background worker for the user.
 Right now it is {{CURRENT_TIME}}. Use this as ground truth for "today", "tomorrow", relative dates, and any date/time math — never guess or infer a date from anything else.
 
 Your job:
-1. BEFORE any other tool call: check the Skills list below against your task. If any skill's description plausibly applies — even loosely — call use_skill(name) first and follow what it says. Skipping this is the single most common cause of real failures (wrong tool defaults, missing calendars/emails, redoing work already solved). Do this even if you think you already know the answer.
-2. Perform the task you were given, end to end.
-3. Use your tools — WebSearch, WebFetch, and any integrations loaded for this spawn — to investigate and act.
-4. Return a concise, well-structured answer — not a data dump.
+1. Perform the task you were given, end to end.
+2. Use your tools — WebSearch, WebFetch, and any integrations loaded for this spawn — to investigate and act.
+3. Return a concise, well-structured answer — not a data dump.
 
 Skills:
-Additional tool-usage guidance lives in on-demand skills — short summaries below. Call use_skill(name) to load one's full instructions before attempting a task that matches it (see step 1 above). If you work out a durable, reusable fix for a tool-usage problem that isn't already covered (not a one-off task result), call write_skill(name, description, body) to save it so future turns don't have to re-learn it.
+Additional tool-usage guidance lives in on-demand skills — short summaries below. At most ONCE, before your first real tool call, check this list against your task; if exactly one skill's description clearly applies, call use_skill(name) a single time and follow it. Never call use_skill more than once for the same skill name in a task, and never call it "just to check" once you've already decided none apply or you've already loaded the ones that do — move on to the actual task immediately after. If you work out a durable, reusable fix for a tool-usage problem that isn't already covered (not a one-off task result), call write_skill(name, description, body) once to save it so future turns don't have to re-learn it.
 {{SKILLS}}
 
 Research discipline:
@@ -169,6 +169,9 @@ export async function spawnExecutionAgent(opts: SpawnExecutionAgentOpts): Promis
 
   const draftTools = opts.conversationId ? createDraftStagingTools(opts.conversationId) : [];
   const skillTools = createSkillTools();
+  // Claude/Codex get web search from their own SDK/API; llama-server has no
+  // equivalent, so it gets a custom SearXNG-backed implementation instead.
+  const webTools = runtimeConfig.runtime === "llama-server" ? createWebTools() : [];
   const integrationServers =
     runtimeConfig.runtime === "claude"
       ? await buildMcpServersForIntegrations(opts.integrations, opts.conversationId)
@@ -178,13 +181,14 @@ export async function spawnExecutionAgent(opts: SpawnExecutionAgentOpts): Promis
       ? await buildRuntimeToolsForIntegrations(opts.integrations, opts.conversationId)
       : [];
   const mcpServers = integrationServers;
-  const runtimeTools = [...draftTools, ...skillTools, ...integrationTools];
+  const runtimeTools = [...draftTools, ...skillTools, ...webTools, ...integrationTools];
   const runtimeToolNamespaces = [...new Set(integrationTools.map((tool) => tool.namespace))];
   const allowedTools = [
     "WebSearch",
     "WebFetch",
     "Skill",
     "mcp__boop-skills__*",
+    "mcp__boop-web__*",
     ...Object.keys(mcpServers).flatMap((n) => [`mcp__${n}__*`]),
     ...(draftTools.length ? ["mcp__boop-drafts__*"] : []),
     ...runtimeToolNamespaces.flatMap((n) => [`mcp__${n}__*`]),

@@ -167,11 +167,22 @@ async function callChatCompletions(
   return json;
 }
 
+// Small local models are more prone than Claude/GPT to getting stuck calling
+// the exact same tool with the exact same arguments over and over (observed
+// live: 20+ consecutive identical use_skill calls burning the whole
+// iteration budget without ever attempting the actual task). Prompt wording
+// alone isn't a reliable enough guard against this, so cap it structurally:
+// after a call repeats too many times, refuse to re-run it and tell the
+// model so directly, giving it a real chance to break out of the loop
+// instead of guaranteeing a hard failure at MAX_TOOL_ITERATIONS.
+const MAX_IDENTICAL_TOOL_CALLS = 2;
+
 export async function runLlamaServerAgent(request: RuntimeRunRequest): Promise<RuntimeRunResult> {
   const baseUrl = getLlamaServerBaseUrl();
   const apiKey = getLlamaServerApiKey();
   const tools = request.tools.filter((t) => isRuntimeToolAllowed(request, t));
   const toolsById = new Map(tools.map((t) => [toolId(t.namespace, t.name), t]));
+  const callSignatureCounts = new Map<string, number>();
 
   const messages = initialMessages(request);
   let usage: UsageTotals = { ...EMPTY_USAGE, model: request.model };
@@ -223,14 +234,23 @@ export async function runLlamaServerAgent(request: RuntimeRunRequest): Promise<R
           messages.push({ role: "tool", tool_call_id: call.id, content: resultText });
           continue;
         }
-        await request.onToolUse?.(toolId(runtimeTool.namespace, runtimeTool.name), args);
-        try {
-          const result = await runtimeTool.handle(args);
-          resultText = result.text;
-        } catch (err) {
-          resultText = `Tool error: ${formatError(err)}`;
+
+        const signature = `${call.function.name}::${JSON.stringify(args)}`;
+        const priorCalls = callSignatureCounts.get(signature) ?? 0;
+        callSignatureCounts.set(signature, priorCalls + 1);
+
+        if (priorCalls >= MAX_IDENTICAL_TOOL_CALLS) {
+          resultText = `You already called ${call.function.name} with these exact same arguments ${priorCalls} time(s) in this task and got a result each time — calling it again will not produce anything new. STOP repeating this call. Either use the result you already have and move on, or if you genuinely need different information, change the arguments. Do not call this exact tool+arguments combination again.`;
+        } else {
+          await request.onToolUse?.(toolId(runtimeTool.namespace, runtimeTool.name), args);
+          try {
+            const result = await runtimeTool.handle(args);
+            resultText = result.text;
+          } catch (err) {
+            resultText = `Tool error: ${formatError(err)}`;
+          }
+          await request.onToolResult?.(toolId(runtimeTool.namespace, runtimeTool.name), resultText);
         }
-        await request.onToolResult?.(toolId(runtimeTool.namespace, runtimeTool.name), resultText);
       }
       messages.push({ role: "tool", tool_call_id: call.id, content: resultText });
     }
