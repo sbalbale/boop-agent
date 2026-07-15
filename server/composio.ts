@@ -484,7 +484,14 @@ function extractAccountIdentity(state: unknown, data: unknown): AccountIdentity 
 export async function renameConnection(connectionId: string, alias: string): Promise<void> {
   const composio = getComposio();
   if (!composio) throw new Error("COMPOSIO_API_KEY not set");
-  await composio.connectedAccounts.update(connectionId, { alias });
+  // The high-level SDK's ConnectedAccounts wrapper only exposes
+  // list/initiate/link/waitForConnection/get/delete/refresh/updateStatus/
+  // enable/disable/updateAcl in this version — no alias-rename method at
+  // all. Drop down to the raw client (same pattern as fetchAllToolkitMeta
+  // above) for the one call that's missing from the wrapper.
+  const apiKey = process.env.COMPOSIO_API_KEY!;
+  const rawClient = new ComposioApiClient({ apiKey });
+  await rawClient.connectedAccounts.patch(connectionId, { alias });
 }
 
 export class ComposioNeedsAuthConfigError extends Error {
@@ -510,7 +517,7 @@ export async function authorizeToolkit(
 
   // 1. Find or create an auth config for the toolkit. session.authorize doesn't
   //    auto-discover or auto-create — we have to pass an authConfigId explicitly
-  //    to connectedAccounts.initiate. That's why a manually-added BYO config in
+  //    to connectedAccounts.link. That's why a manually-added BYO config in
   //    the dashboard would still trip "require auth configs but none exist" on
   //    the previous session.authorize-based code path.
   let authConfigId: string;
@@ -536,12 +543,16 @@ export async function authorizeToolkit(
     }
   }
 
-  // 2. Initiate the connection. allowMultiple if there's already an active connection
+  // 2. Link the connection. allowMultiple if there's already an active connection
   //    so we add another account instead of replacing.
+  //    `initiate()` is deprecated for Composio-managed OAuth (retired org-wide
+  //    as of 2026-07-03 — this box hit that cutover, which is what turned every
+  //    single toolkit's Connect button into a 400 "no longer supported" error).
+  //    `link()` is the documented replacement, same options shape.
   const existing = (await listConnectedToolkits()).filter(
     (c) => c.slug === slug && c.status === "ACTIVE",
   );
-  const conn = await composio.connectedAccounts.initiate(boopUserId(), authConfigId, {
+  const conn = await composio.connectedAccounts.link(boopUserId(), authConfigId, {
     ...(existing.length > 0 ? { allowMultiple: true } : {}),
     ...(opts?.callbackUrl ? { callbackUrl: opts.callbackUrl } : {}),
     ...(opts?.alias ? { alias: opts.alias } : {}),
