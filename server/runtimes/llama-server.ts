@@ -3,6 +3,7 @@ import { formatError } from "../error-format.js";
 import { getLlamaServerApiKey, getLlamaServerBaseUrl, getLlamaServerMaxTokens } from "../runtime-config.js";
 import type {
   RuntimeImageBlock,
+  RuntimeReasoningEffort,
   RuntimeRunRequest,
   RuntimeRunResult,
   RuntimeTextBlock,
@@ -72,8 +73,30 @@ function promptBlockToContentPart(block: RuntimeImageBlock | RuntimeTextBlock): 
   };
 }
 
+// llama.cpp's OpenAI-compatible endpoint has no "reasoning_effort" request
+// parameter (that's an OpenAI/Codex-specific API knob) — Gemma 4's chat
+// template always emits its own thinking channel via --jinja regardless of
+// what's in the request body. This is a best-effort prompt-level substitute:
+// it nudges how much the model thinks before answering, but unlike Codex's
+// actual API parameter, the model can choose to ignore it.
+const REASONING_EFFORT_INSTRUCTIONS: Record<RuntimeReasoningEffort, string> = {
+  minimal: "Skip extended reasoning — answer directly and concisely with minimal internal deliberation.",
+  low: "Keep internal reasoning brief — a few quick considerations, then answer.",
+  medium: "Reason through the task at a normal, moderate depth before answering.",
+  high: "Reason thoroughly through the task step by step, considering edge cases, before answering.",
+  xhigh: "Reason extensively and rigorously — consider multiple angles and double-check your logic before answering.",
+};
+
+function systemPromptWithReasoningEffort(request: RuntimeRunRequest): string {
+  const effort = request.reasoningEffort;
+  if (!effort) return request.systemPrompt;
+  return `${request.systemPrompt}\n\n${REASONING_EFFORT_INSTRUCTIONS[effort]}`;
+}
+
 function initialMessages(request: RuntimeRunRequest): OpenAiMessage[] {
-  const messages: OpenAiMessage[] = [{ role: "system", content: request.systemPrompt }];
+  const messages: OpenAiMessage[] = [
+    { role: "system", content: systemPromptWithReasoningEffort(request) },
+  ];
   if (typeof request.prompt === "string") {
     messages.push({ role: "user", content: request.prompt });
   } else {

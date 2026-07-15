@@ -23,7 +23,7 @@ import {
   getBrowserSettings,
   resolveModelInput,
   resolveRuntimeInput,
-  setCodexReasoningEffort,
+  setReasoningEffort,
   setRuntimeModel,
   setRuntimeProvider,
 } from "./runtime-config.js";
@@ -180,12 +180,19 @@ Use when the user says "use opus", "switch to sonnet", "use Codex mini", "use ge
     ),
     defineRuntimeTool(
       NAMESPACE,
-      "set_codex_reasoning_effort",
-      "Set Codex reasoning effort for future Codex turns. Use low for speed, medium for default work, high/xhigh for deeper work.",
+      "set_reasoning_effort",
+      "Set reasoning effort for future turns on the current runtime (Codex or llama-server). Use low for speed, medium for default work, high/xhigh for deeper work. No-op if the active runtime is Claude, which has no equivalent knob.",
       { effort: reasoningEffortSchema },
       async ({ effort }) => {
-        await setCodexReasoningEffort(effort as RuntimeReasoningEffort);
-        return runtimeText(`Codex reasoning effort set to ${effort}. Next Codex turn will use it.`);
+        const runtime = (await getRuntimeConfig()).runtime;
+        if (runtime !== "codex" && runtime !== "llama-server") {
+          return runtimeText(
+            `The active runtime is ${runtime}, which has no reasoning-effort setting.`,
+            false,
+          );
+        }
+        await setReasoningEffort(effort as RuntimeReasoningEffort, runtime);
+        return runtimeText(`${runtime} reasoning effort set to ${effort}. Next turn will use it.`);
       },
     ),
     defineRuntimeTool(

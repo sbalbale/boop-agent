@@ -9,6 +9,7 @@ const CLAUDE_MODEL_KEY = "model";
 const CODEX_MODEL_KEY = "codex_model";
 const LLAMA_SERVER_MODEL_KEY = "llama_server_model";
 const CODEX_REASONING_EFFORT_KEY = "codex_reasoning_effort";
+const LLAMA_SERVER_REASONING_EFFORT_KEY = "llama_server_reasoning_effort";
 const BROWSER_ENABLED_KEY = "browser_enabled";
 const BROWSER_PROFILE_DIR_KEY = "browser_profile_dir";
 const BROWSER_SHOW_UI_KEY = "browser_show_ui";
@@ -219,12 +220,11 @@ export function getLlamaServerMaxTokens(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_LLAMA_SERVER_MAX_TOKENS;
 }
 
-function resolveReasoningEffort(input: string | null): RuntimeReasoningEffort {
-  return (
-    resolveReasoningEffortInput(
-      input ?? process.env.BOOP_CODEX_REASONING_EFFORT ?? "medium",
-    ) ?? "medium"
-  );
+function resolveReasoningEffort(
+  input: string | null,
+  envFallback = process.env.BOOP_CODEX_REASONING_EFFORT,
+): RuntimeReasoningEffort {
+  return resolveReasoningEffortInput(input ?? envFallback ?? "medium") ?? "medium";
 }
 
 export function resolveReasoningEffortInput(
@@ -296,6 +296,10 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
   } else if (runtime === "llama-server") {
     const stored = await getSetting(LLAMA_SERVER_MODEL_KEY);
     model = stored?.trim() || llamaServerEnvFallback();
+    reasoningEffort = resolveReasoningEffort(
+      await getSetting(LLAMA_SERVER_REASONING_EFFORT_KEY),
+      process.env.BOOP_LLAMA_SERVER_REASONING_EFFORT,
+    );
     billingMode = "local";
   } else {
     const stored = await getSetting(CLAUDE_MODEL_KEY);
@@ -326,13 +330,20 @@ export async function setRuntimeModel(model: string, runtime?: RuntimeName): Pro
   cachedConfig = null;
 }
 
-export async function setCodexReasoningEffort(
+function reasoningEffortSettingKeyFor(runtime: RuntimeName): string | null {
+  if (runtime === "codex") return CODEX_REASONING_EFFORT_KEY;
+  if (runtime === "llama-server") return LLAMA_SERVER_REASONING_EFFORT_KEY;
+  return null;
+}
+
+export async function setReasoningEffort(
   effort: RuntimeReasoningEffort,
+  runtime?: RuntimeName,
 ): Promise<void> {
-  await convex.mutation(api.settings.set, {
-    key: CODEX_REASONING_EFFORT_KEY,
-    value: effort,
-  });
+  const targetRuntime = runtime ?? (await getRuntimeConfig()).runtime;
+  const key = reasoningEffortSettingKeyFor(targetRuntime);
+  if (!key) throw new Error(`Runtime "${targetRuntime}" does not support reasoning effort.`);
+  await convex.mutation(api.settings.set, { key, value: effort });
   cachedConfig = null;
 }
 

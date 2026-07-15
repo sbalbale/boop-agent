@@ -25,7 +25,7 @@ import {
   resolveModelInput,
   resolveReasoningEffortInput,
   resolveRuntimeInput,
-  setCodexReasoningEffort,
+  setReasoningEffort,
   setRuntimeModel,
   setRuntimeProvider,
 } from "./runtime-config.js";
@@ -121,11 +121,17 @@ async function main() {
         const effort = resolveReasoningEffortInput(String(body.reasoningEffort));
         if (!effort) {
           res.status(400).json({
-            error: `Unknown Codex reasoning effort "${String(body.reasoningEffort)}"`,
+            error: `Unknown reasoning effort "${String(body.reasoningEffort)}"`,
           });
           return;
         }
-        await setCodexReasoningEffort(effort);
+        if (runtime !== "codex" && runtime !== "llama-server") {
+          res.status(400).json({
+            error: `Runtime "${runtime}" does not support reasoning effort.`,
+          });
+          return;
+        }
+        await setReasoningEffort(effort, runtime);
       }
 
       res.json(await getRuntimeConfig());

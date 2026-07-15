@@ -583,6 +583,9 @@ function RuntimeRow({ isDark }: { isDark: boolean }) {
   const storedLlamaServerModel = useQuery(api.settings.get, {
     key: "llama_server_model",
   });
+  const storedLlamaServerEffort = useQuery(api.settings.get, {
+    key: "llama_server_reasoning_effort",
+  });
 
   const [serverConfig, setServerConfig] = useState<RuntimeConfigSnapshot | null>(
     null,
@@ -626,7 +629,15 @@ function RuntimeRow({ isDark }: { isDark: boolean }) {
       cancelled = true;
       if (timeout) window.clearTimeout(timeout);
     };
-  }, [refreshServerConfig, storedRuntime, storedClaudeModel, storedHostedModel, storedHostedEffort, storedLlamaServerModel]);
+  }, [
+    refreshServerConfig,
+    storedRuntime,
+    storedClaudeModel,
+    storedHostedModel,
+    storedHostedEffort,
+    storedLlamaServerModel,
+    storedLlamaServerEffort,
+  ]);
 
   const runtime: RuntimeChoice =
     serverConfig?.runtime ??
@@ -652,8 +663,12 @@ function RuntimeRow({ isDark }: { isDark: boolean }) {
       ? optionValue(serverConfig.model, activeModelOptions, firstModelValue)
       : firstModelValue;
   const activeModel = optionValue(storedModel, activeModelOptions, modelFallback);
+  const supportsReasoningEffort = runtime === "codex" || runtime === "llama-server";
+  const effortKey =
+    runtime === "codex" ? "codex_reasoning_effort" : "llama_server_reasoning_effort";
+  const storedEffort = runtime === "codex" ? storedHostedEffort : storedLlamaServerEffort;
   const reasoningEffort = optionValue(
-    storedHostedEffort,
+    storedEffort,
     CODEX_REASONING_EFFORTS,
     serverConfig?.reasoningEffort ?? "medium",
   );
@@ -684,13 +699,9 @@ function RuntimeRow({ isDark }: { isDark: boolean }) {
     settingDebug("runtime", storedRuntime, serverConfig?.runtime ?? "claude"),
     settingDebug(modelKey, storedModel, serverModelFallback),
   ];
-  if (runtime === "codex") {
+  if (supportsReasoningEffort) {
     debugParts.push(
-      settingDebug(
-        "codex_reasoning_effort",
-        storedHostedEffort,
-        serverConfig?.reasoningEffort ?? "medium",
-      ),
+      settingDebug(effortKey, storedEffort, serverConfig?.reasoningEffort ?? "medium"),
     );
   }
   debugParts.push(`billing: ${serverConfig?.billingMode ?? "…"}`);
@@ -779,13 +790,13 @@ function RuntimeRow({ isDark }: { isDark: boolean }) {
               <select
                 value={reasoningEffort}
                 disabled={
-                  runtime !== "codex" ||
+                  !supportsReasoningEffort ||
                   saving !== null ||
-                  storedHostedEffort === undefined
+                  storedEffort === undefined
                 }
                 onChange={(e) =>
-                  savePatch(`codex_reasoning_effort:${e.target.value}`, {
-                    runtime: "codex",
+                  savePatch(`${effortKey}:${e.target.value}`, {
+                    runtime,
                     reasoningEffort: e.target.value as ReasoningEffort,
                   })
                 }
