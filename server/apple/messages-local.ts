@@ -45,6 +45,13 @@ export interface LocalMessageFilters {
   query?: string;
   sinceHours?: number;
   limit?: number;
+  /**
+   * When `query` is set, also include this many messages immediately before
+   * and after each match within the same thread (ranked by send order, not
+   * clock time) so replies that don't repeat the matched text are still
+   * visible. Ignored when `query` is not set. Defaults to 3.
+   */
+  context?: number;
 }
 
 interface RawChatRow {
@@ -80,6 +87,11 @@ function isMac(): boolean {
 function capLimit(input: number | undefined, fallback: number): number {
   if (!Number.isFinite(input ?? NaN)) return fallback;
   return Math.max(1, Math.min(Math.trunc(input!), 200));
+}
+
+function capContext(input: number | undefined, fallback: number): number {
+  if (!Number.isFinite(input ?? NaN)) return fallback;
+  return Math.max(0, Math.min(Math.trunc(input!), 20));
 }
 
 function sqlInteger(input: number): string {
@@ -190,16 +202,12 @@ export async function readLocalMessages(filters: LocalMessageFilters = {}): Prom
   if (filters.participant?.trim()) {
     where.push(await participantWhereClause(filters.participant.trim()));
   }
-  if (filters.query?.trim()) {
-    const pattern = sqlLiteral(`%${escapeLike(filters.query.trim())}%`);
-    where.push(`m.text LIKE ${pattern} ESCAPE '\\'`);
-  }
   if (filters.sinceHours !== undefined && filters.sinceHours > 0) {
     const cutoff = Date.now() - filters.sinceHours * 60 * 60 * 1000;
     where.push(`m.date >= ${sqlInteger(appleNanoseconds(cutoff))}`);
   }
 
-  const rows = await runSql<RawMessageRow>(`
+  const baseSelect = `
     SELECT
       m.ROWID AS id,
       cmj.chat_id AS chatId,
@@ -215,10 +223,39 @@ export async function readLocalMessages(filters: LocalMessageFilters = {}): Prom
     JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
     JOIN chat c ON c.ROWID = cmj.chat_id
     LEFT JOIN handle h ON h.ROWID = m.handle_id
-    WHERE ${where.join("\n      AND ")}
+    WHERE ${where.join("\n      AND ")}`;
+
+  const trimmedQuery = filters.query?.trim();
+  const sql = trimmedQuery
+    ? (() => {
+        const pattern = sqlLiteral(`%${escapeLike(trimmedQuery)}%`);
+        const context = capContext(filters.context, 3);
+        return `
+    WITH filtered AS (${baseSelect}
+    ),
+    ranked AS (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY chatId ORDER BY date) AS rn
+      FROM filtered
+    ),
+    matches AS (
+      SELECT chatId, rn FROM ranked WHERE text LIKE ${pattern} ESCAPE '\\'
+    )
+    SELECT DISTINCT ranked.id, ranked.chatId, ranked.displayName, ranked.chatGuid,
+      ranked.handle, ranked.isFromMe, ranked.text, ranked.attributedBodyHex,
+      ranked.date, ranked.hasAttachments
+    FROM ranked
+    JOIN matches ON ranked.chatId = matches.chatId
+      AND ranked.rn BETWEEN matches.rn - ${sqlInteger(context)} AND matches.rn + ${sqlInteger(context)}
+    ORDER BY ranked.date DESC
+    LIMIT ${sqlInteger(cappedLimit)}
+  `;
+      })()
+    : `${baseSelect}
     ORDER BY m.date DESC
     LIMIT ${sqlInteger(cappedLimit)}
-  `);
+  `;
+
+  const rows = await runSql<RawMessageRow>(sql);
 
   return rows.map((row) => {
     const hasAttachments = row.hasAttachments !== 0;

@@ -168,6 +168,7 @@ async function listMessages(filters: {
   chat_id?: number;
   participant?: string;
   query?: string;
+  context?: number;
   since_hours?: number;
   limit?: number;
 }): Promise<BridgeMessage[]> {
@@ -177,6 +178,7 @@ async function listMessages(filters: {
         chatId: filters.chat_id,
         participant: filters.participant,
         query: filters.query,
+        context: filters.context,
         sinceHours: filters.since_hours,
         limit: filters.limit,
       });
@@ -190,6 +192,7 @@ async function listMessages(filters: {
       chatId: filters.chat_id,
       participant: filters.participant,
       query: filters.query,
+      context: filters.context,
       sinceHours: filters.since_hours,
       limit: filters.limit,
     },
@@ -278,21 +281,25 @@ export function createAppleTools(namespace = NAMESPACE): RuntimeTool[] {
     defineRuntimeTool(
       namespace,
       "apple_read_messages",
-      `Read the user's iMessage/SMS history, newest first, optionally filtered by chat, participant, text query, or recency. ${LOCAL_NOTE}`,
+      `Read the user's iMessage/SMS history, newest first, optionally filtered by chat, participant, text query, or recency. When "query" is set, results also include a few messages immediately before/after each match in the same thread (see "context"), so replies that don't repeat the matched text are still visible. ${LOCAL_NOTE}`,
       {
         chat_id: z.number().optional().describe("Numeric chat id from apple_list_chats."),
         participant: z
           .string()
           .optional()
           .describe("Filter by a participant contact name, phone number, or email."),
-        query: z.string().optional().describe("Filter to messages containing this text."),
+        query: z.string().optional().describe("Filter to messages containing this text, plus surrounding context (see \"context\")."),
+        context: z
+          .number()
+          .optional()
+          .describe("Only used with query: how many messages before/after each match to also include, in the same thread (default 3, max 20). Set to 0 for exact matches only."),
         since_hours: z
           .number()
           .optional()
           .describe("Only messages from the last N hours."),
         limit: z.number().optional().describe("Max messages to return (default 50, max 200)."),
       },
-      async ({ chat_id, participant, query, since_hours, limit }) =>
+      async ({ chat_id, participant, query, context, since_hours, limit }) =>
         wrap(async () => {
           if (!(await messagesEnabled())) {
             return "iMessage reads are disabled in Boop Connections. Turn on iMessage under Local Mac to use this tool.";
@@ -301,6 +308,7 @@ export function createAppleTools(namespace = NAMESPACE): RuntimeTool[] {
             chat_id,
             participant,
             query,
+            context,
             since_hours,
             limit,
           });
