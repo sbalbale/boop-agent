@@ -2,9 +2,10 @@ import { z } from "zod";
 import { createClaudeMcpServer } from "../runtimes/claude.js";
 import { defineRuntimeTool } from "../runtimes/tool.js";
 import { runtimeText, type RuntimeTool } from "../runtimes/types.js";
-import { redactContactHandle, redactPhoneNumbers } from "../privacy.js";
+import { redactPhoneNumbers } from "../privacy.js";
 import { getAppleSettings } from "../runtime-config.js";
 import { appleBridgeRequest, readBridgeInfo } from "./client.js";
+import { resolveContactNamesForHandles } from "./contacts-local.js";
 import { listLocalChats, readLocalMessages } from "./messages-local.js";
 import { readLocalNote, searchLocalNotes } from "./notes-local.js";
 import { listLocalReminders } from "./reminders-local.js";
@@ -93,18 +94,28 @@ async function wrap(fn: () => Promise<string>) {
   }
 }
 
-function formatChat(chat: BridgeChat): string {
-  const participants = chat.participants.map(redactContactHandle).join(", ");
-  const name = redactContactHandle(chat.displayName?.trim() || participants || chat.identifier);
-  const identifier = redactContactHandle(chat.identifier);
-  return `#${chat.id} ${name} (${identifier}) — ${chat.participants.length} participants — last message ${chat.lastMessageAt ?? "unknown"}`;
+// Resolves to the actual Contacts.app name when we have one; otherwise shows
+// the raw handle as-is. Messages/chats from different people used to all get
+// redacted to the same generic "[phone number hidden]" placeholder, which
+// made them indistinguishable to the model whenever a search spanned more
+// than one thread — a resolved name (or, failing that, the real number)
+// fixes that; the raw digits reaching the model is not a concern here.
+function displayHandle(handle: string, nameForHandle: Map<string, string>): string {
+  if (handle === "me" || handle === "unknown" || !handle) return handle;
+  return nameForHandle.get(handle) ?? handle;
 }
 
-function formatMessage(message: BridgeMessage): string {
-  let text = redactPhoneNumbers(message.text?.trim() ?? "");
+function formatChat(chat: BridgeChat, nameForHandle: Map<string, string>): string {
+  const participants = chat.participants.map((p) => displayHandle(p, nameForHandle)).join(", ");
+  const name = chat.displayName?.trim() || participants || chat.identifier;
+  return `#${chat.id} ${name} (${chat.identifier}) — ${chat.participants.length} participants — last message ${chat.lastMessageAt ?? "unknown"}`;
+}
+
+function formatMessage(message: BridgeMessage, nameForHandle: Map<string, string>): string {
+  let text = message.text?.trim() ?? "";
   if (text.length > MESSAGE_TEXT_LIMIT) text = `${text.slice(0, MESSAGE_TEXT_LIMIT)}…`;
   if (!text && message.hasAttachments) text = "(attachment)";
-  return `[${message.sentAt}] ${redactContactHandle(message.sender)}: ${text}`;
+  return `[${message.sentAt}] ${displayHandle(message.sender, nameForHandle)}: ${text}`;
 }
 
 function formatEvent(event: BridgeEvent): string {
@@ -275,7 +286,10 @@ export function createAppleTools(namespace = NAMESPACE): RuntimeTool[] {
           }
           const chats = await listChats(limit);
           if (chats.length === 0) return "No chats found.";
-          return chats.map(formatChat).join("\n");
+          const nameForHandle = await resolveContactNamesForHandles(
+            chats.flatMap((c) => c.participants),
+          );
+          return chats.map((c) => formatChat(c, nameForHandle)).join("\n");
         }),
     ),
     defineRuntimeTool(
@@ -313,7 +327,10 @@ export function createAppleTools(namespace = NAMESPACE): RuntimeTool[] {
             limit,
           });
           if (messages.length === 0) return "No messages found.";
-          return messages.map(formatMessage).join("\n");
+          const nameForHandle = await resolveContactNamesForHandles(
+            messages.map((m) => m.sender),
+          );
+          return messages.map((m) => formatMessage(m, nameForHandle)).join("\n");
         }),
     ),
     defineRuntimeTool(

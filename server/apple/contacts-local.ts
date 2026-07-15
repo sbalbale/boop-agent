@@ -273,3 +273,107 @@ export async function resolveLocalContactHandles(query: string): Promise<LocalCo
     handles: unique(handles),
   };
 }
+
+function normalizedPhoneSql(expression: string): string {
+  return ["+", " ", "-", "(", ")", ".", " "].reduce(
+    (acc, character) => `REPLACE(${acc}, ${sqlLiteral(character)}, '')`,
+    expression,
+  );
+}
+
+function contactDisplayName(row: ContactCandidateRow): string | null {
+  const fullName = [row.firstName, row.lastName].filter(Boolean).join(" ").trim();
+  return fullName || row.nickname?.trim() || row.name?.trim() || row.organization?.trim() || null;
+}
+
+async function findContactIdByEmail(dbPath: string, email: string): Promise<number | null> {
+  const rows = await runSql<{ owner: number | null }>(
+    dbPath,
+    `
+      SELECT COALESCE(ZOWNER, Z22_OWNER) AS owner
+      FROM ZABCDEMAILADDRESS
+      WHERE LOWER(COALESCE(ZADDRESSNORMALIZED, ZADDRESS, '')) = LOWER(${sqlLiteral(email)})
+      LIMIT 1
+    `,
+  );
+  return rows[0]?.owner ?? null;
+}
+
+async function findContactIdByPhoneSuffix(dbPath: string, suffixDigits: string): Promise<number | null> {
+  const normalizedColumn = normalizedPhoneSql("COALESCE(ZFULLNUMBER, '')");
+  const rows = await runSql<{ owner: number | null }>(
+    dbPath,
+    `
+      SELECT COALESCE(ZOWNER, Z22_OWNER) AS owner
+      FROM ZABCDPHONENUMBER
+      WHERE ${normalizedColumn} LIKE ${sqlLiteral(`%${suffixDigits}`)}
+      LIMIT 1
+    `,
+  );
+  return rows[0]?.owner ?? null;
+}
+
+async function readContactDisplayNameById(dbPath: string, contactId: number): Promise<string | null> {
+  const rows = await runSql<ContactCandidateRow>(
+    dbPath,
+    `
+      SELECT
+        Z_PK AS id,
+        ZFIRSTNAME AS firstName,
+        ZLASTNAME AS lastName,
+        ZNICKNAME AS nickname,
+        ZORGANIZATION AS organization,
+        ZNAME AS name,
+        ZNAMENORMALIZED AS normalizedName
+      FROM ZABCDRECORD
+      WHERE Z_PK = ${sqlInteger(contactId)}
+      LIMIT 1
+    `,
+  );
+  const row = rows[0];
+  return row ? contactDisplayName(row) : null;
+}
+
+// Reverse of resolveLocalContactHandles: given a raw handle (phone number or
+// email) from a message row, find the matching Contacts.app entry's display
+// name. Messages from different people all show up with the same generic
+// redacted placeholder otherwise (redactContactHandle only strips digits, it
+// doesn't know who they belong to) — when a search spans multiple threads,
+// that makes messages from entirely different contacts indistinguishable to
+// the model. Resolving to a name fixes that and is more private, not less:
+// the actual digits still never reach the model.
+export async function resolveContactNameForHandle(handle: string): Promise<string | null> {
+  const trimmed = handle.trim();
+  if (!isMac() || !trimmed || !existsSync(SQLITE_BIN)) return null;
+
+  const isEmail = trimmed.includes("@");
+  const suffixDigits = (() => {
+    const digits = normalizePhoneDigits(trimmed);
+    return digits.length > 10 ? digits.slice(-10) : digits;
+  })();
+  if (!isEmail && suffixDigits.length < 7) return null;
+
+  for (const dbPath of findAddressBookDbs()) {
+    const contactId = isEmail
+      ? await findContactIdByEmail(dbPath, trimmed)
+      : await findContactIdByPhoneSuffix(dbPath, suffixDigits);
+    if (contactId === null) continue;
+    const name = await readContactDisplayNameById(dbPath, contactId);
+    if (name) return name;
+  }
+  return null;
+}
+
+// Bulk version so callers formatting a page of messages don't spawn a
+// sqlite3 subprocess per row — resolves each distinct handle once.
+export async function resolveContactNamesForHandles(
+  handles: string[],
+): Promise<Map<string, string>> {
+  const unique_ = unique(handles.map((h) => h.trim()).filter(Boolean));
+  const result = new Map<string, string>();
+  for (const handle of unique_) {
+    const name = await resolveContactNameForHandle(handle);
+    if (name) result.set(handle, name);
+  }
+  return result;
+}
