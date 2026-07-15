@@ -14,7 +14,16 @@ const storedTheme = (() => {
 })();
 document.documentElement.classList.add(storedTheme === "light" ? "light" : "dark");
 
-const convexUrl = import.meta.env.VITE_CONVEX_URL;
+// The local Convex backend's own URL (baked in at build time by
+// `npx convex dev`, e.g. http://127.0.0.1:3210) only resolves on the same
+// machine the server runs on. When the dashboard is reached through a
+// reverse proxy at a real domain, use the proxied Convex URL instead —
+// see server/convex-proxy.ts for how that traffic is authenticated.
+const isLocalHost =
+  window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+const convexUrl = isLocalHost
+  ? import.meta.env.VITE_CONVEX_URL
+  : (import.meta.env.VITE_CONVEX_PROXY_URL ?? import.meta.env.VITE_CONVEX_URL);
 if (!convexUrl) {
   document.getElementById("root")!.innerHTML = `
     <div style="padding:2rem;font-family:Geist,ui-sans-serif,system-ui,sans-serif">

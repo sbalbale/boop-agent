@@ -11,7 +11,7 @@ import {
 import { AppleSection } from "./AppleSection.js";
 import { BrowserSection } from "./BrowserSection.js";
 
-type RuntimeChoice = "claude" | "codex";
+type RuntimeChoice = "claude" | "codex" | "llama-server";
 type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
 
 interface Option<T extends string = string> {
@@ -23,7 +23,7 @@ interface RuntimeConfigSnapshot {
   runtime: RuntimeChoice;
   model: string;
   reasoningEffort?: ReasoningEffort;
-  billingMode: "api" | "codex-subscription";
+  billingMode: "api" | "codex-subscription" | "local";
 }
 
 interface ConnectionConfigSnapshot {
@@ -72,6 +72,7 @@ const DEMO_PHONE_NUMBER = "+11111111111";
 const RUNTIME_OPTIONS: Option<RuntimeChoice>[] = [
   { value: "claude", label: "Claude" },
   { value: "codex", label: "Codex" },
+  { value: "llama-server", label: "llama-server" },
 ];
 
 const CLAUDE_MODELS: Option[] = [
@@ -86,6 +87,18 @@ const CODEX_MODELS: Option[] = [
   { value: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
   { value: "gpt-5.3-codex", label: "GPT-5.3 Agent" },
   { value: "gpt-5.2", label: "GPT-5.2" },
+];
+
+// Self-hosted endpoints have no fixed vendor model list; this is just a
+// starting curated set matching a typical llama.cpp/llama-swap install.
+// Use the set_model iMessage tool to switch to any model your endpoint has
+// loaded, even if it is not listed here.
+const LLAMA_SERVER_MODELS: Option[] = [
+  { value: "gemma4-12b-qat-256k", label: "Gemma4 12B (256k)" },
+  { value: "gemma4-26b-a4b-qat-256k", label: "Gemma4 26B-A4B (256k)" },
+  { value: "gemma4-26b-a4b-qat-128k", label: "Gemma4 26B-A4B (128k)" },
+  { value: "qwen3.6-35b-a3b-mtp-256k", label: "Qwen3.6 35B-A3B (256k)" },
+  { value: "qwen3.6-35b-a3b-mtp-128k", label: "Qwen3.6 35B-A3B (128k)" },
 ];
 
 const CODEX_REASONING_EFFORTS: Option<ReasoningEffort>[] = [
@@ -368,7 +381,9 @@ function SettingsRuntimeBadge({ isDark }: { isDark: boolean }) {
 
   const runtime: RuntimeProvider | null =
     serverConfig?.runtime ??
-    (storedRuntime === "claude" || storedRuntime === "codex" ? storedRuntime : null);
+    (storedRuntime === "claude" || storedRuntime === "codex" || storedRuntime === "llama-server"
+      ? storedRuntime
+      : null);
 
   if (!runtime) return null;
 
@@ -565,6 +580,9 @@ function RuntimeRow({ isDark }: { isDark: boolean }) {
   const storedHostedEffort = useQuery(api.settings.get, {
     key: "codex_reasoning_effort",
   });
+  const storedLlamaServerModel = useQuery(api.settings.get, {
+    key: "llama_server_model",
+  });
 
   const [serverConfig, setServerConfig] = useState<RuntimeConfigSnapshot | null>(
     null,
@@ -608,15 +626,24 @@ function RuntimeRow({ isDark }: { isDark: boolean }) {
       cancelled = true;
       if (timeout) window.clearTimeout(timeout);
     };
-  }, [refreshServerConfig, storedRuntime, storedClaudeModel, storedHostedModel, storedHostedEffort]);
+  }, [refreshServerConfig, storedRuntime, storedClaudeModel, storedHostedModel, storedHostedEffort, storedLlamaServerModel]);
 
   const runtime: RuntimeChoice =
     serverConfig?.runtime ??
-    (storedRuntime === "claude" || storedRuntime === "codex" ? storedRuntime : "claude");
+    (storedRuntime === "claude" || storedRuntime === "codex" || storedRuntime === "llama-server"
+      ? storedRuntime
+      : "claude");
 
-  const activeModelOptions = runtime === "codex" ? CODEX_MODELS : CLAUDE_MODELS;
-  const modelKey = runtime === "codex" ? "codex_model" : "model";
-  const storedModel = runtime === "codex" ? storedHostedModel : storedClaudeModel;
+  const activeModelOptions =
+    runtime === "codex" ? CODEX_MODELS : runtime === "llama-server" ? LLAMA_SERVER_MODELS : CLAUDE_MODELS;
+  const modelKey =
+    runtime === "codex" ? "codex_model" : runtime === "llama-server" ? "llama_server_model" : "model";
+  const storedModel =
+    runtime === "codex"
+      ? storedHostedModel
+      : runtime === "llama-server"
+        ? storedLlamaServerModel
+        : storedClaudeModel;
   const firstModelValue = activeModelOptions[0]?.value ?? "";
   const serverModelFallback =
     serverConfig?.runtime === runtime ? serverConfig.model : firstModelValue;
@@ -687,7 +714,7 @@ function RuntimeRow({ isDark }: { isDark: boolean }) {
       control={
         <div className="flex w-full min-w-0 flex-col items-end gap-3 lg:min-w-[360px]">
           <div
-            className={`segmented-control grid w-full grid-cols-2 rounded-2xl border p-1 ${segmentBase}`}
+            className={`segmented-control grid w-full grid-cols-3 rounded-2xl border p-1 ${segmentBase}`}
             role="group"
             aria-label="AI provider"
           >

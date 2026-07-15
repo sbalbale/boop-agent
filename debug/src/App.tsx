@@ -210,12 +210,16 @@ export function App() {
   const currentView = NAV.find((item) => item.id === view)?.label ?? "Dashboard";
   const demoModeEnabled = demoStatus?.enabled ?? false;
   const storedProvider: RuntimeProvider | null =
-    storedRuntime === "claude" || storedRuntime === "codex" ? storedRuntime : null;
+    storedRuntime === "claude" || storedRuntime === "codex" || storedRuntime === "llama-server"
+      ? storedRuntime
+      : null;
   const activeRuntime = runtimeConfig?.runtime ?? storedProvider ?? (demoModeEnabled ? "codex" : null);
   const providerLabel = activeRuntime
     ? activeRuntime === "codex"
       ? "Codex"
-      : "Claude"
+      : activeRuntime === "llama-server"
+        ? "llama-server"
+        : "Claude"
     : "Runtime";
   const modelLabel =
     runtimeConfig?.model ??

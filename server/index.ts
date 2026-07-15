@@ -31,6 +31,7 @@ import {
 } from "./runtime-config.js";
 import { startImageCleanup } from "./images/clean.js";
 import { isPublicServerRequest, isTrustedRequest } from "./local-access.js";
+import { mountConvexProxy, isConvexProxyUpgrade, handleConvexProxyUpgrade } from "./convex-proxy.js";
 
 async function main() {
   await loadIntegrations();
@@ -188,7 +189,15 @@ async function main() {
   });
 
   const server = createServer(app);
-  const wss = new WebSocketServer({ server, path: "/ws" });
+  mountConvexProxy(app);
+  // Both this app's own WebSocket and the Convex realtime proxy need to
+  // handle upgrades on the same underlying server. They must be dispatched
+  // from a single, centralized 'upgrade' listener rather than each
+  // registering its own — see handleConvexProxyUpgrade's docstring in
+  // convex-proxy.ts for why running two independent WebSocketServer/
+  // upgrade-handler instances on one server raced and silently corrupted
+  // each other's responses.
+  const wss = new WebSocketServer({ noServer: true });
   wss.on("connection", (ws, request) => {
     if (!isTrustedRequest(request)) {
       ws.close(1008, "local connections only");
@@ -196,6 +205,17 @@ async function main() {
     }
     addClient(ws);
     ws.send(JSON.stringify({ event: "hello", data: { ok: true }, at: Date.now() }));
+  });
+  server.on("upgrade", (req, socket, head) => {
+    if (isConvexProxyUpgrade(req)) {
+      handleConvexProxyUpgrade(req, socket, head);
+      return;
+    }
+    if (req.url === "/ws") {
+      wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+      return;
+    }
+    socket.destroy();
   });
 
   const port = Number(process.env.PORT ?? 3456);
