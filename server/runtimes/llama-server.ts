@@ -1,4 +1,4 @@
-import { EMPTY_USAGE, type UsageTotals } from "../usage.js";
+import { EMPTY_USAGE, estimateLocalHostedEquivalentCostUsd, type UsageTotals } from "../usage.js";
 import { formatError } from "../error-format.js";
 import { getLlamaServerApiKey, getLlamaServerBaseUrl, getLlamaServerMaxTokens } from "../runtime-config.js";
 import type {
@@ -120,15 +120,17 @@ function toOpenAiTools(tools: RuntimeTool[]): Array<{
 }
 
 function accumulateUsage(usage: UsageTotals, response: OpenAiChatCompletionResponse, model: string): UsageTotals {
-  return {
+  const next = {
     model,
     inputTokens: usage.inputTokens + (response.usage?.prompt_tokens ?? 0),
     outputTokens: usage.outputTokens + (response.usage?.completion_tokens ?? 0),
     cacheReadTokens: usage.cacheReadTokens,
     cacheCreationTokens: usage.cacheCreationTokens,
-    // Self-hosted inference has no per-token billing.
-    costUsd: 0,
   };
+  // Self-hosted inference has no real per-token bill — this is an estimate
+  // of what the same tokens would cost against a comparable hosted API for
+  // the same open-weight model, not money actually spent.
+  return { ...next, costUsd: estimateLocalHostedEquivalentCostUsd(next) };
 }
 
 async function callChatCompletions(

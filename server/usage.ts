@@ -41,17 +41,21 @@ const OPENAI_STANDARD_TOKEN_PRICES: TokenPrice[] = [
   { model: "gpt-5", inputPerMillion: 1.25, cachedInputPerMillion: 0.125, outputPerMillion: 10 },
 ];
 
-function priceForOpenAIModel(model: string): TokenPrice | null {
+function findPriceForModel(table: TokenPrice[], model: string): TokenPrice | null {
   const normalized = model.trim().toLowerCase();
   if (!normalized) return null;
-  const exact = OPENAI_STANDARD_TOKEN_PRICES.find((price) => price.model === normalized);
+  const exact = table.find((price) => price.model === normalized);
   if (exact) return exact;
   return (
-    [...OPENAI_STANDARD_TOKEN_PRICES]
+    [...table]
       .sort((a, b) => b.model.length - a.model.length)
       .find((price) => normalized.startsWith(`${price.model}-`) || normalized.startsWith(price.model)) ??
     null
   );
+}
+
+function priceForOpenAIModel(model: string): TokenPrice | null {
+  return findPriceForModel(OPENAI_STANDARD_TOKEN_PRICES, model);
 }
 
 export function estimateOpenAiCostUsd(usage: Omit<UsageTotals, "costUsd">): number {
@@ -71,6 +75,30 @@ export function estimateOpenAiCostUsd(usage: Omit<UsageTotals, "costUsd">): numb
       usage.outputTokens * price.outputPerMillion) /
     1_000_000
   );
+}
+
+// Self-hosted models have no real per-token bill, but showing a flat $0.00
+// everywhere hides what the same tokens would cost against a comparable
+// hosted API for the same open-weight model — useful for judging whether
+// self-hosting is actually worth it. Sourced from OpenRouter-listed rates
+// for each model family (median across providers) as of mid-2026; update
+// here if pricing moves or a new local model family gets added.
+const LOCAL_MODEL_HOSTED_EQUIVALENT_PRICES: TokenPrice[] = [
+  { model: "gemma4-12b", inputPerMillion: 0.10, cachedInputPerMillion: 0.10, outputPerMillion: 0.30 },
+  { model: "gemma4-26b-a4b", inputPerMillion: 0.06, cachedInputPerMillion: 0.06, outputPerMillion: 0.33 },
+  { model: "gemma4-31b", inputPerMillion: 0.06, cachedInputPerMillion: 0.06, outputPerMillion: 0.35 },
+  { model: "qwen3.6-35b-a3b", inputPerMillion: 0.14, cachedInputPerMillion: 0.14, outputPerMillion: 0.90 },
+];
+
+export function estimateLocalHostedEquivalentCostUsd(
+  usage: Omit<UsageTotals, "costUsd">,
+): number {
+  const price = findPriceForModel(LOCAL_MODEL_HOSTED_EQUIVALENT_PRICES, usage.model);
+  if (!price) return 0;
+  // No real cache-discount tier to model here (that's an artifact of the
+  // hosted provider's own infra, not something a comparison estimate should
+  // assume) — just price all input tokens at the flat input rate.
+  return (usage.inputTokens * price.inputPerMillion + usage.outputTokens * price.outputPerMillion) / 1_000_000;
 }
 
 /**

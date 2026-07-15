@@ -366,10 +366,13 @@ export function DashboardPanel({ isDark }: { isDark: boolean }) {
                   <p className="mb-1.5">
                     Claude rows use SDK-reported cost when available. Codex rows are
                     estimated from token counts and configured token pricing.
+                    llama-server (local) rows are estimated against comparable
+                    hosted-API pricing for the same open-weight model — no money is
+                    actually spent running locally.
                   </p>
                   <p>
-                    Subscription-backed runtimes still bill through the subscription,
-                    so treat this as a usage proxy.
+                    Subscription-backed and self-hosted runtimes don't bill per
+                    token at all, so treat this as a usage proxy.
                   </p>
                 </>
               ),
