@@ -43,25 +43,30 @@ async function geocode(location: string): Promise<GeocodeResult> {
   };
 }
 
-// --- OpenWeatherMap (primary, when a key is configured) ---
+// --- OpenWeatherMap One Call API 4.0 (primary, when a key + subscription is
+// configured) — both endpoints wrap their record(s) in a top-level "data"
+// array (confirmed against OpenWeatherMap's own docs), not a flat object or
+// nested under "current"/"daily" like the older 2.5/3.0 APIs. ---
 
-interface OwmCurrent {
-  main: { temp: number; feels_like: number; humidity: number };
+interface OwmCurrentEntry {
+  temp: number;
+  feels_like: number;
+  humidity: number;
+  wind_speed: number;
   weather: Array<{ description: string }>;
-  wind: { speed: number };
+}
+
+interface OwmCurrentResponse {
+  data: OwmCurrentEntry[];
 }
 
 interface OwmDailyEntry {
-  temp: { day: number; min: number; max: number; night: number };
-  feels_like: { day: number };
-  humidity: number;
-  speed: number;
+  temp: { min: number; max: number };
   pop?: number;
-  weather: Array<{ description: string }>;
 }
 
-interface OwmDailyForecast {
-  list: OwmDailyEntry[];
+interface OwmDailyResponse {
+  data: OwmDailyEntry[];
 }
 
 interface OwmAirPollution {
@@ -70,7 +75,8 @@ interface OwmAirPollution {
 
 // OpenWeatherMap's free Air Pollution API reports its own 1-5 index, not the
 // US EPA 0-500 scale (AirNow/PurpleAir) — labeled explicitly in the output so
-// it isn't mistaken for the more familiar 0-500 number.
+// it isn't mistaken for the more familiar 0-500 number. Not part of the
+// One Call subscription — same classic endpoint regardless.
 const OWM_AQI_LABELS: Record<number, string> = {
   1: "Good",
   2: "Fair",
@@ -79,28 +85,58 @@ const OWM_AQI_LABELS: Record<number, string> = {
   5: "Very Poor",
 };
 
+// A daily cap enforced from our side, independent of and stricter than the
+// 750/day limit set on the OpenWeatherMap account itself — a second layer so
+// a bug or unexpected volume here can't run up against (or rely entirely on)
+// the account-level enforcement. Resets at UTC midnight. Configurable since
+// "how many calls is safe" depends on whatever cap is set on the account.
+const DEFAULT_OPENWEATHER_DAILY_LIMIT = 300;
+let openWeatherCallCount = 0;
+let openWeatherCountResetAt = 0;
+
+function getOpenWeatherDailyLimit(): number {
+  const raw = process.env.BOOP_OPENWEATHER_DAILY_LIMIT;
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_OPENWEATHER_DAILY_LIMIT;
+}
+
+function tryConsumeOpenWeatherBudget(): boolean {
+  const now = Date.now();
+  if (now >= openWeatherCountResetAt) {
+    openWeatherCallCount = 0;
+    const nextUtcMidnight = new Date();
+    nextUtcMidnight.setUTCHours(24, 0, 0, 0);
+    openWeatherCountResetAt = nextUtcMidnight.getTime();
+  }
+  if (openWeatherCallCount >= getOpenWeatherDailyLimit()) return false;
+  openWeatherCallCount += 1;
+  return true;
+}
+
 async function getOpenWeatherReport(geo: GeocodeResult, apiKey: string): Promise<string> {
-  const base = "https://api.openweathermap.org/data/2.5";
+  const base = "https://api.openweathermap.org/data/4.0/onecall";
   const [current, daily, air] = await Promise.all([
-    fetchJson<OwmCurrent>(`${base}/weather?lat=${geo.lat}&lon=${geo.lon}&appid=${apiKey}&units=imperial`),
-    fetchJson<OwmDailyForecast>(
-      `${base}/forecast/daily?lat=${geo.lat}&lon=${geo.lon}&cnt=1&appid=${apiKey}&units=imperial`,
+    fetchJson<OwmCurrentResponse>(`${base}/current?lat=${geo.lat}&lon=${geo.lon}&appid=${apiKey}&units=imperial`),
+    fetchJson<OwmDailyResponse>(
+      `${base}/timeline/1day?lat=${geo.lat}&lon=${geo.lon}&appid=${apiKey}&units=imperial`,
     ),
-    fetchJson<OwmAirPollution>(`${base}/air_pollution?lat=${geo.lat}&lon=${geo.lon}&appid=${apiKey}`).catch(
-      () => null,
-    ),
+    fetchJson<OwmAirPollution>(
+      `https://api.openweathermap.org/data/2.5/air_pollution?lat=${geo.lat}&lon=${geo.lon}&appid=${apiKey}`,
+    ).catch(() => null),
   ]);
 
-  const today = daily.list[0];
+  const currentEntry = current.data[0];
+  if (!currentEntry) throw new Error("OpenWeatherMap returned no current-conditions data.");
+  const today = daily.data[0];
   const high = today ? Math.round(today.temp.max) : null;
   const low = today ? Math.round(today.temp.min) : null;
   const maxPop = today?.pop !== undefined ? Math.round(today.pop * 100) : null;
 
   const lines = [
-    `${geo.displayName} — currently ${Math.round(current.main.temp)}°F (feels like ${Math.round(
-      current.main.feels_like,
-    )}°F), ${current.weather[0]?.description ?? "conditions unavailable"}`,
-    `Humidity: ${current.main.humidity}% · Wind: ${Math.round(current.wind.speed)} mph`,
+    `${geo.displayName} — currently ${Math.round(currentEntry.temp)}°F (feels like ${Math.round(
+      currentEntry.feels_like,
+    )}°F), ${currentEntry.weather[0]?.description ?? "conditions unavailable"}`,
+    `Humidity: ${currentEntry.humidity}% · Wind: ${Math.round(currentEntry.wind_speed)} mph`,
     high !== null && low !== null
       ? `Today: high ${high}°F / low ${low}°F${maxPop !== null ? `, chance of rain ${maxPop}%` : ""}`
       : "Today's high/low forecast unavailable.",
@@ -109,7 +145,7 @@ async function getOpenWeatherReport(geo: GeocodeResult, apiKey: string): Promise
     const aqi = air.list[0].main.aqi;
     lines.push(`Air Quality Index: ${OWM_AQI_LABELS[aqi] ?? aqi} (OpenWeatherMap's 1-5 scale, not the US 0-500 AQI scale)`);
   }
-  lines.push("(Source: OpenWeatherMap)");
+  lines.push("(Source: OpenWeatherMap One Call API 4.0)");
   return lines.join("\n");
 }
 
@@ -189,7 +225,7 @@ export function createWeatherTools(namespace = NAMESPACE): RuntimeTool[] {
         }
 
         const apiKey = process.env.BOOP_OPENWEATHER_API_KEY;
-        if (apiKey) {
+        if (apiKey && tryConsumeOpenWeatherBudget()) {
           try {
             return runtimeText(await getOpenWeatherReport(geo, apiKey));
           } catch (err) {
