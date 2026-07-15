@@ -1,8 +1,8 @@
 ---
 name: package-search
-description: How to phrase package/delivery/shipping search tasks for spawn_agent so the sub-agent searches broadly instead of narrowing to a few named carriers.
+description: "How to phrase package/delivery/shipping search tasks for spawn_agent so the sub-agent searches broadly instead of narrowing to a few named carriers."
+source: self-authored
 ---
-
 # Package / shipping searches
 
 When asked about packages, deliveries, or what's "out for delivery", phrase

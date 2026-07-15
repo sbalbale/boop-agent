@@ -12,6 +12,7 @@ import {
   Settings01Icon,
   Moon02Icon,
   Sun03Icon,
+  Idea01Icon,
 } from "@hugeicons/core-free-icons";
 import { api } from "../../convex/_generated/api.js";
 import { useSocket } from "./lib/useSocket.js";
@@ -22,6 +23,7 @@ import { MemoryPanel } from "./components/MemoryPanel.js";
 import { EventsPanel } from "./components/EventsPanel.js";
 import { ConnectionsPanel } from "./components/ConnectionsPanel.js";
 import { ConsolidationPanel } from "./components/ConsolidationPanel.js";
+import { SkillsPanel } from "./components/SkillsPanel.js";
 import { SettingsPanel } from "./components/SettingsPanel.js";
 import { ChangelogDrawer } from "./components/ChangelogDrawer.js";
 import { RuntimeProviderLogo, type RuntimeProvider } from "./lib/branding.js";
@@ -34,6 +36,7 @@ type View =
   | "memory"
   | "events"
   | "consolidation"
+  | "skills"
   | "connections"
   | "settings";
 
@@ -91,6 +94,7 @@ const NAV_ICONS: Record<View, any> = {
   memory: AiBrain02Icon,
   events: Activity01Icon,
   consolidation: ArrowShrink02Icon,
+  skills: Idea01Icon,
   connections: Link04Icon,
   settings: Settings01Icon,
 };
@@ -102,6 +106,7 @@ const NAV: { id: View; label: string }[] = [
   { id: "memory", label: "Memory" },
   { id: "events", label: "Events" },
   { id: "consolidation", label: "Consolidation" },
+  { id: "skills", label: "Skills" },
   { id: "connections", label: "Connections" },
   { id: "settings", label: "Settings" },
 ];
@@ -395,6 +400,7 @@ export function App() {
             )}
             {view === "events" && <EventsPanel isDark={isDark} />}
             {view === "consolidation" && <ConsolidationPanel isDark={isDark} />}
+            {view === "skills" && <SkillsPanel isDark={isDark} />}
             {view === "connections" && <ConnectionsPanel isDark={isDark} />}
             {view === "settings" && (
               <SettingsPanel

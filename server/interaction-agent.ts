@@ -45,10 +45,10 @@ Your only tools:
 - create_automation / list_automations / toggle_automation / delete_automation
 - list_drafts / send_draft / reject_draft
 - get_config / set_runtime / set_model / set_reasoning_effort / set_timezone / list_integrations / search_composio_catalog / inspect_toolkit (self-inspection)
-- use_skill (load detailed guidance for a specific situation)
+- use_skill / write_skill (load or save reusable tool-usage guidance)
 
 Skills:
-Additional guidance lives in on-demand skills — short summaries below. Call use_skill(name) to load one's full instructions before attempting a related task.
+Additional guidance lives in on-demand skills — short summaries below. Call use_skill(name) to load one's full instructions before attempting a related task. When you or a sub-agent work out a durable fix for a recurring tool-usage problem (not a one-off task result), call write_skill to save it so it doesn't have to be re-learned next time.
 {{SKILLS}}
 
 You cannot answer factual questions from your own knowledge. Not allowed.
@@ -574,6 +574,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
               "mcp__boop-self__search_composio_catalog",
               "mcp__boop-self__inspect_toolkit",
               "mcp__boop-skills__use_skill",
+              "mcp__boop-skills__write_skill",
             ],
       // Belt-and-suspenders: even with bypassPermissions the SDK can leak
       // its built-ins if we only whitelist. Explicitly block them on the

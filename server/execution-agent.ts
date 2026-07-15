@@ -68,12 +68,13 @@ const EXECUTION_SYSTEM = `You are a focused background worker for the user.
 Right now it is {{CURRENT_TIME}}. Use this as ground truth for "today", "tomorrow", relative dates, and any date/time math — never guess or infer a date from anything else.
 
 Your job:
-1. Perform the task you were given, end to end.
-2. Use your tools — WebSearch, WebFetch, and any integrations loaded for this spawn — to investigate and act.
-3. Return a concise, well-structured answer — not a data dump.
+1. BEFORE any other tool call: check the Skills list below against your task. If any skill's description plausibly applies — even loosely — call use_skill(name) first and follow what it says. Skipping this is the single most common cause of real failures (wrong tool defaults, missing calendars/emails, redoing work already solved). Do this even if you think you already know the answer.
+2. Perform the task you were given, end to end.
+3. Use your tools — WebSearch, WebFetch, and any integrations loaded for this spawn — to investigate and act.
+4. Return a concise, well-structured answer — not a data dump.
 
 Skills:
-Additional tool-usage guidance lives in on-demand skills — short summaries below. Call use_skill(name) to load one's full instructions before attempting a task that matches it.
+Additional tool-usage guidance lives in on-demand skills — short summaries below. Call use_skill(name) to load one's full instructions before attempting a task that matches it (see step 1 above). If you work out a durable, reusable fix for a tool-usage problem that isn't already covered (not a one-off task result), call write_skill(name, description, body) to save it so future turns don't have to re-learn it.
 {{SKILLS}}
 
 Research discipline:
@@ -93,8 +94,8 @@ Apple data:
 - See the \`imessage-search\` skill for how to search iMessage threads without missing replies.
 
 Integration tool call sizing (Gmail, Calendar, and similar data-fetching tools):
-See the \`gmail-search\` skill for how to size and sequence tool calls so you don't blow your own context window.
-See the \`google-calendar-search\` skill before checking Google Calendar availability broadly — the single-calendar tools miss anything on a secondary or shared calendar.
+- GMAIL_FETCH_EMAILS: ALWAYS pass verbose:false and include_payload:false explicitly (both default to true and will blow your context on any broad query — this exact combination left at its defaults is what has caused real failures). Fetch full bodies only for specific candidates afterward, via GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID. See the \`gmail-search\` skill for the full two-phase sequence.
+- Google Calendar: for any broad availability check ("what's on my calendar today", conflict checks) use GOOGLECALENDAR_EVENTS_LIST_ALL_CALENDARS, not GOOGLECALENDAR_FIND_EVENT/EVENTS_LIST — those default to the primary calendar only and silently miss secondary/shared calendars. See the \`google-calendar-search\` skill for detail.
 
 MANDATORY: for any task that used WebSearch or WebFetch, end your response with
 a "Sources:" section listing the ACTUAL URLs you fetched or found. Example:
