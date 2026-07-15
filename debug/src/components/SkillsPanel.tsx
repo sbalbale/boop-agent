@@ -41,13 +41,13 @@ function inputClass(isDark: boolean): string {
 }
 
 function primaryButtonClass(isDark: boolean): string {
-  return `rounded-xl px-3 py-1.5 text-xs font-medium transition disabled:opacity-50 ${
+  return `shrink-0 whitespace-nowrap rounded-xl px-3 py-1.5 text-xs font-medium transition disabled:opacity-50 ${
     isDark ? "bg-zinc-100 text-zinc-950 hover:bg-white" : "bg-zinc-950 text-white hover:bg-zinc-800"
   }`;
 }
 
 function ghostButtonClass(isDark: boolean): string {
-  return `rounded-xl px-3 py-1.5 text-xs font-medium transition ${
+  return `shrink-0 whitespace-nowrap rounded-xl px-3 py-1.5 text-xs font-medium transition ${
     isDark ? "text-zinc-400 hover:text-zinc-100" : "text-zinc-500 hover:text-zinc-900"
   }`;
 }
@@ -284,7 +284,7 @@ export function SkillsPanel({ isDark }: { isDark: boolean }) {
                             type="button"
                             onClick={() => confirmDeleteSkill(skill.name)}
                             disabled={deleting === skill.name}
-                            className="rounded-xl px-3 py-1.5 text-xs font-medium text-rose-500 hover:text-rose-400 disabled:opacity-50"
+                            className="shrink-0 whitespace-nowrap rounded-xl px-3 py-1.5 text-xs font-medium text-rose-500 hover:text-rose-400 disabled:opacity-50"
                           >
                             {deleting === skill.name ? "Deleting…" : "confirm delete"}
                           </button>
@@ -300,7 +300,7 @@ export function SkillsPanel({ isDark }: { isDark: boolean }) {
                         <button
                           type="button"
                           onClick={() => setConfirmDelete(skill.name)}
-                          className="rounded-xl px-3 py-1.5 text-xs font-medium text-rose-500/80 hover:text-rose-500"
+                          className="shrink-0 whitespace-nowrap rounded-xl px-3 py-1.5 text-xs font-medium text-rose-500/80 hover:text-rose-500"
                         >
                           delete
                         </button>
