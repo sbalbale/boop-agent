@@ -9,6 +9,7 @@ import { createAutomationTools } from "./automation-tools.js";
 import { createDraftDecisionTools } from "./draft-tools.js";
 import { createSelfTools } from "./self-tools.js";
 import { createSkillTools, buildSkillIndex } from "./skills.js";
+import { describeUserNow } from "./timezone-config.js";
 import {
   getRuntimeConfig,
   resolveRuntimeInput,
@@ -27,6 +28,8 @@ import {
 import { redactPhoneNumbers } from "./privacy.js";
 
 const INTERACTION_SYSTEM = `You are Boop, a personal agent the user texts from iMessage.
+
+Right now it is {{CURRENT_TIME}}. Use this as ground truth for "today", "tomorrow", relative dates, and any date/time math — never guess or infer a date from anything else. When a task you spawn depends on a date (calendar checks, deadlines, "today"), resolve it to an explicit date yourself before handing it to the sub-agent — don't pass through words like "today" and assume the sub-agent can resolve them; it can't.
 
 You are a DISPATCHER, not a doer. Your job:
 1. Understand what the user wants.
@@ -219,14 +222,13 @@ will vary; route by what they're trying to accomplish, not by keyword
 matching.
 
 Time / timezone:
-The user has a saved timezone in get_config.userTimezone. Whenever your reply
-or a sub-agent's task depends on local time (deadlines, "today", "9am
-tomorrow", RSVP windows, scheduling, "in N hours"), call get_config first to
-read it. If userTimezone is null, the system is currently using
-timezoneFallback (the server's local zone, which may be wrong) — ASK the
-user once ("what timezone are you in?") and call set_timezone with their
-answer. Don't silently guess from city names mentioned in passing — confirm
-before saving.
+The current time above already reflects the user's saved timezone if they
+have one. If it's marked as NOT yet confirmed, that means it's just the
+server's local guess (timezoneFallback) — ASK the user once ("what timezone
+are you in?") and call set_timezone with their answer before relying on it
+for anything that actually matters (deadlines, "9am tomorrow", RSVP windows).
+Don't silently guess from city names mentioned in passing — confirm before
+saving.
 
 Available integrations for spawn_agent: {{INTEGRATIONS}}
 
@@ -363,10 +365,16 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
     .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
     .join("\n");
 
-  const systemPrompt = INTERACTION_SYSTEM.replace(
-    "{{INTEGRATIONS}}",
-    integrations.join(", ") || "(no integrations configured yet)",
-  ).replace("{{SKILLS}}", buildSkillIndex());
+  const nowInfo = await describeUserNow();
+  const currentTimeText = `${nowInfo.now} (ISO date: ${nowInfo.isoDate}, timezone: ${nowInfo.timezone}${
+    nowInfo.isExplicit ? ", user-confirmed" : ", NOT yet confirmed by the user — just a server guess"
+  })`;
+  const systemPrompt = INTERACTION_SYSTEM.replace("{{CURRENT_TIME}}", currentTimeText)
+    .replace(
+      "{{INTEGRATIONS}}",
+      integrations.join(", ") || "(no integrations configured yet)",
+    )
+    .replace("{{SKILLS}}", buildSkillIndex());
 
   const userText = opts.mediaError
     ? `[user sent images but they couldn't be downloaded: ${opts.mediaError}]\n${opts.content}`

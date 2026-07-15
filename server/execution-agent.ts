@@ -8,6 +8,7 @@ import {
 } from "./integrations/registry.js";
 import { createDraftStagingTools } from "./draft-tools.js";
 import { createSkillTools, buildSkillIndex } from "./skills.js";
+import { describeUserNow } from "./timezone-config.js";
 import { EMPTY_USAGE, type UsageTotals } from "./usage.js";
 import { getRuntimeConfig, type RuntimeConfig } from "./runtime-config.js";
 import { runAgentRuntime } from "./runtimes/index.js";
@@ -63,6 +64,8 @@ export function redactToolInputForLog(toolName: string, input: unknown): unknown
 }
 
 const EXECUTION_SYSTEM = `You are a focused background worker for the user.
+
+Right now it is {{CURRENT_TIME}}. Use this as ground truth for "today", "tomorrow", relative dates, and any date/time math — never guess or infer a date from anything else.
 
 Your job:
 1. Perform the task you were given, end to end.
@@ -196,9 +199,13 @@ export async function spawnExecutionAgent(opts: SpawnExecutionAgentOpts): Promis
       imageStorageIds: opts.imageStorageIds,
       fetchBytes: fetchStoredBytes,
     });
+    const nowInfo = await describeUserNow();
     const result = await runAgentRuntime(runtimeConfig, {
       prompt: executionPrompt,
-      systemPrompt: EXECUTION_SYSTEM.replace("{{SKILLS}}", buildSkillIndex()),
+      systemPrompt: EXECUTION_SYSTEM.replace(
+        "{{CURRENT_TIME}}",
+        `${nowInfo.now} (ISO date: ${nowInfo.isoDate}, timezone: ${nowInfo.timezone})`,
+      ).replace("{{SKILLS}}", buildSkillIndex()),
       claudeMcpServers: mcpServers,
       tools: runtimeTools,
       allowedTools,
