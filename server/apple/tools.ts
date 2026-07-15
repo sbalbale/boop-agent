@@ -9,11 +9,12 @@ import { resolveContactNamesForHandles } from "./contacts-local.js";
 import { listLocalChats, readLocalMessages } from "./messages-local.js";
 import { readLocalNote, searchLocalNotes } from "./notes-local.js";
 import { listLocalReminders } from "./reminders-local.js";
+import { listLocalCalendarEvents } from "./calendar-local.js";
 
 const NAMESPACE = "apple";
 
 const LOCAL_NOTE =
-  "Read-only data that lives on the user's Mac. iMessage reads run from the local Mac server with Full Disk Access; Apple Notes and Reminders reads run from the local Mac server with Automation permission; Calendar uses the optional Apple bridge.";
+  "Read-only data that lives on the user's Mac. iMessage reads run from the local Mac server with Full Disk Access; Apple Notes, Reminders, and Calendar reads run from the local Mac server with Automation permission.";
 
 const MESSAGE_TEXT_LIMIT = 500;
 
@@ -157,6 +158,10 @@ async function remindersEnabled(): Promise<boolean> {
   return (await getAppleSettings()).remindersEnabled;
 }
 
+async function calendarEnabled(): Promise<boolean> {
+  return (await getAppleSettings()).calendarEnabled;
+}
+
 async function bridgeAvailable(): Promise<boolean> {
   return Boolean(await readBridgeInfo());
 }
@@ -270,6 +275,30 @@ async function listReminders(filters: {
   return reminders;
 }
 
+async function listCalendarEvents(filters: {
+  from_date?: string;
+  to_date?: string;
+  calendar?: string;
+}): Promise<BridgeEvent[]> {
+  if (process.platform === "darwin") {
+    try {
+      return await listLocalCalendarEvents({
+        from: filters.from_date,
+        to: filters.to_date,
+        calendar: filters.calendar,
+      });
+    } catch (err) {
+      if (!(await bridgeAvailable())) throw err;
+    }
+  }
+  const { events } = await appleBridgeRequest<{ events: BridgeEvent[] }>("/calendar/events", {
+    from: filters.from_date,
+    to: filters.to_date,
+    calendar: filters.calendar,
+  });
+  return events;
+}
+
 export function createAppleTools(namespace = NAMESPACE): RuntimeTool[] {
   return [
     defineRuntimeTool(
@@ -353,10 +382,10 @@ export function createAppleTools(namespace = NAMESPACE): RuntimeTool[] {
       },
       async ({ from_date, to_date, calendar }) =>
         wrap(async () => {
-          const { events } = await appleBridgeRequest<{ events: BridgeEvent[] }>(
-            "/calendar/events",
-            { from: from_date, to: to_date, calendar },
-          );
+          if (!(await calendarEnabled())) {
+            return "Apple Calendar reads are disabled in Boop Connections. Turn on Apple Calendar under Local Mac to use this tool.";
+          }
+          const events = await listCalendarEvents({ from_date, to_date, calendar });
           if (events.length === 0) return "No calendar events found.";
           return events.map(formatEvent).join("\n");
         }),

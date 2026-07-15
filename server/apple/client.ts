@@ -8,14 +8,15 @@ import {
 } from "./messages-local.js";
 import { getCachedLocalNotesAccess, requestLocalNotesAccess } from "./notes-local.js";
 import { getCachedLocalRemindersAccess, requestLocalRemindersAccess } from "./reminders-local.js";
+import { getCachedLocalCalendarAccess, requestLocalCalendarAccess } from "./calendar-local.js";
 
 const REQUEST_TIMEOUT_MS = 10_000;
 
 export const BRIDGE_UNREACHABLE_MESSAGE =
-  "The Apple bridge isn't running. iMessage, Apple Notes, and Apple Reminders can still work from the local Mac server; Calendar requires the optional bridge.";
+  "The Apple bridge isn't running. iMessage, Apple Notes, Apple Reminders, and Apple Calendar can still work from the local Mac server with the right permissions.";
 
 const BRIDGE_TIMEOUT_MESSAGE =
-  "The Apple bridge didn't respond in time. Calendar requires the optional bridge to be running on this Mac.";
+  "The Apple bridge didn't respond in time.";
 
 export interface AppleBridgeInfo {
   port: number;
@@ -121,6 +122,7 @@ interface AppleBridgeHealth {
 interface AppleBridgeStatusOptions {
   probeNotes?: boolean;
   probeReminders?: boolean;
+  probeCalendars?: boolean;
 }
 
 async function localNotesPermission(probe: boolean): Promise<string> {
@@ -143,6 +145,16 @@ async function localRemindersPermission(probe: boolean): Promise<string> {
   }
 }
 
+async function localCalendarPermission(probe: boolean): Promise<string> {
+  const cached = getCachedLocalCalendarAccess();
+  if (!probe || cached === "granted") return cached;
+  try {
+    return await requestLocalCalendarAccess();
+  } catch {
+    return getCachedLocalCalendarAccess();
+  }
+}
+
 async function localServerStatus(options: AppleBridgeStatusOptions = {}): Promise<AppleBridgeStatus> {
   if (process.platform !== "darwin") {
     return {
@@ -154,10 +166,11 @@ async function localServerStatus(options: AppleBridgeStatusOptions = {}): Promis
       error: LOCAL_MESSAGES_UNSUPPORTED_MESSAGE,
     };
   }
-  const [messages, notes, reminders] = await Promise.all([
+  const [messages, notes, reminders, calendars] = await Promise.all([
     probeLocalMessagesAccess(),
     localNotesPermission(Boolean(options.probeNotes)),
     localRemindersPermission(Boolean(options.probeReminders)),
+    localCalendarPermission(Boolean(options.probeCalendars)),
   ]);
   return {
     running: true,
@@ -166,7 +179,7 @@ async function localServerStatus(options: AppleBridgeStatusOptions = {}): Promis
     version: process.version,
     permissions: {
       messages,
-      calendars: "notDetermined",
+      calendars,
       reminders,
       notes,
     },

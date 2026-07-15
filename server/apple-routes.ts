@@ -5,27 +5,31 @@ import { promisify } from "node:util";
 import { api } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
 import { isLocalBrowserControlRequest } from "./browser-routes.js";
+import { isTrustedReverseProxyRequest } from "./local-access.js";
 import {
   APPLE_ENABLED_KEY,
   APPLE_MESSAGES_ENABLED_KEY,
   APPLE_NOTES_ENABLED_KEY,
   APPLE_REMINDERS_ENABLED_KEY,
+  APPLE_CALENDAR_ENABLED_KEY,
   clearAppleSettingsCache,
   getAppleSettings,
 } from "./runtime-config.js";
 import { getAppleBridgeStatus, type AppleBridgeStatus } from "./apple/client.js";
 import { requestLocalNotesAccess } from "./apple/notes-local.js";
 import { requestLocalRemindersAccess } from "./apple/reminders-local.js";
+import { requestLocalCalendarAccess } from "./apple/calendar-local.js";
 
 interface AppleStatusResponse {
   enabled: boolean;
   messagesEnabled: boolean;
   notesEnabled: boolean;
   remindersEnabled: boolean;
+  calendarEnabled: boolean;
   bridge: AppleBridgeStatus;
 }
 
-type AppleSource = "messages" | "notes" | "reminders";
+type AppleSource = "messages" | "notes" | "reminders" | "calendar";
 
 const execFileAsync = promisify(execFile);
 const FULL_DISK_ACCESS_URL =
@@ -34,7 +38,10 @@ const AUTOMATION_URL =
   "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation";
 
 function requireLocalAppleControl(req: Request, res: Response, next: NextFunction): void {
-  if (isLocalBrowserControlRequest(req.headers, req.socket.remoteAddress ?? "")) {
+  if (
+    isLocalBrowserControlRequest(req.headers, req.socket.remoteAddress ?? "") ||
+    isTrustedReverseProxyRequest(req)
+  ) {
     next();
     return;
   }
@@ -49,12 +56,14 @@ async function appleStatus(): Promise<AppleStatusResponse> {
   const bridge = await getAppleBridgeStatus({
     probeNotes: settings.notesEnabled,
     probeReminders: settings.remindersEnabled,
+    probeCalendars: settings.calendarEnabled,
   });
   return {
     enabled: settings.enabled,
     messagesEnabled: settings.messagesEnabled,
     notesEnabled: settings.notesEnabled,
     remindersEnabled: settings.remindersEnabled,
+    calendarEnabled: settings.calendarEnabled,
     bridge,
   };
 }
@@ -77,7 +86,9 @@ async function setAppleSourceEnabled(
       ? APPLE_MESSAGES_ENABLED_KEY
       : source === "notes"
         ? APPLE_NOTES_ENABLED_KEY
-        : APPLE_REMINDERS_ENABLED_KEY;
+        : source === "reminders"
+          ? APPLE_REMINDERS_ENABLED_KEY
+          : APPLE_CALENDAR_ENABLED_KEY;
   await Promise.all([
     enabled
       ? convex.mutation(api.settings.set, {
@@ -184,6 +195,22 @@ export function createAppleRouter(): express.Router {
     }
   });
 
+  router.post("/calendar/enable", async (_req, res) => {
+    try {
+      res.json(await setAppleSourceEnabled("calendar", true));
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  router.post("/calendar/disable", async (_req, res) => {
+    try {
+      res.json(await setAppleSourceEnabled("calendar", false));
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   router.post("/open-full-disk-access", async (_req, res) => {
     try {
       await openFullDiskAccessSettings();
@@ -205,6 +232,15 @@ export function createAppleRouter(): express.Router {
   router.post("/request-reminders-access", async (_req, res) => {
     try {
       await requestLocalRemindersAccess();
+      res.json(await appleStatus());
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  router.post("/request-calendar-access", async (_req, res) => {
+    try {
+      await requestLocalCalendarAccess();
       res.json(await appleStatus());
     } catch (err) {
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
