@@ -206,6 +206,19 @@ export function getLlamaServerApiKey(): string | undefined {
   return process.env.BOOP_LLAMA_SERVER_API_KEY || undefined;
 }
 
+// Self-hosted inference has no per-request cost ceiling the way a billed API
+// does, and no built-in agent loop to notice a task is stuck — a demanding
+// reasoning task (e.g. consolidation's structured-JSON proposals) can run
+// away generating indefinitely at temperature 0 with no cap. Bound it so a
+// bad request fails fast instead of pinning the GPU forever.
+const DEFAULT_LLAMA_SERVER_MAX_TOKENS = 4096;
+
+export function getLlamaServerMaxTokens(): number {
+  const raw = process.env.BOOP_LLAMA_SERVER_MAX_TOKENS;
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_LLAMA_SERVER_MAX_TOKENS;
+}
+
 function resolveReasoningEffort(input: string | null): RuntimeReasoningEffort {
   return (
     resolveReasoningEffortInput(

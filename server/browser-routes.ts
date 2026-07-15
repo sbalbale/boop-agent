@@ -1,5 +1,6 @@
 import express from "express";
 import type { NextFunction, Request, Response } from "express";
+import { isTrustedReverseProxyRequest } from "./local-access.js";
 import { clearBrowserSettingsCache, getBrowserSettings } from "./runtime-config.js";
 import {
   closeLocalBrowser,
@@ -69,13 +70,24 @@ export function isLocalBrowserControlRequest(
 }
 
 function requireLocalBrowserControl(req: Request, res: Response, next: NextFunction): void {
-  if (isLocalBrowserControlRequest(req.headers, req.socket.remoteAddress ?? "")) {
+  // Browser control drives a real, logged-in Chrome profile on the host
+  // running boop-agent, so this stays deliberately stricter than the other
+  // integration routes: true loopback, or an explicitly-trusted reverse
+  // proxy that vouches for the request via BOOP_TRUSTED_PROXY_SECRET (the
+  // same mechanism the dashboard's Convex/WS proxy already relies on) — not
+  // "reachable from the public internet at all", which relaxing this to
+  // plain isTrustedRequest()'s local-authority checks alone would not
+  // actually add, since those still require a loopback-shaped Host header.
+  if (
+    isLocalBrowserControlRequest(req.headers, req.socket.remoteAddress ?? "") ||
+    isTrustedReverseProxyRequest(req)
+  ) {
     next();
     return;
   }
   res.status(403).json({
     ok: false,
-    error: "Local browser control routes are only available from localhost.",
+    error: "Local browser control routes are only available from localhost or a trusted reverse proxy.",
   });
 }
 

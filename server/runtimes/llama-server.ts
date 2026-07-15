@@ -1,6 +1,6 @@
 import { EMPTY_USAGE, type UsageTotals } from "../usage.js";
 import { formatError } from "../error-format.js";
-import { getLlamaServerApiKey, getLlamaServerBaseUrl } from "../runtime-config.js";
+import { getLlamaServerApiKey, getLlamaServerBaseUrl, getLlamaServerMaxTokens } from "../runtime-config.js";
 import type {
   RuntimeImageBlock,
   RuntimeRunRequest,
@@ -123,6 +123,7 @@ async function callChatCompletions(
     model,
     messages,
     temperature: 0,
+    max_tokens: getLlamaServerMaxTokens(),
   };
   if (tools.length > 0) {
     body.tools = toOpenAiTools(tools);
